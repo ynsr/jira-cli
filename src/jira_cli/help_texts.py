@@ -13,6 +13,10 @@ COMMANDS:
   issue <KEY> comments        Paginated comment list (truncated text)
   issue <KEY> comment <ID>    Full single comment detail
   issue <KEY> add-comment     Add a comment
+  issue <KEY> update-description  Update issue description (--body)
+  issue <KEY> transition <ID>     Transition issue to a new status
+  issue <KEY> assign <USER>       Assign/reassign issue
+  issue <KEY> edit-comment <ID>   Edit an existing comment body
   setup                       Configure credentials
   completion <shell>          Print a shell completion script (bash, zsh, fish)
   help                        This help text
@@ -26,6 +30,10 @@ EXAMPLES:
   jira-cli issue PROJ-123 comments --limit 5 --desc
   jira-cli issue PROJ-123 comment 12345
   jira-cli issue PROJ-123 add-comment --body "Looking into this"
+  jira-cli issue PROJ-123 update-description --body "New description text"
+  jira-cli issue PROJ-123 transition 41
+  jira-cli issue PROJ-123 assign jane.doe
+  jira-cli issue PROJ-123 edit-comment 12345 --body "Updated comment"
   jira-cli completion bash
 
 AI USAGE:

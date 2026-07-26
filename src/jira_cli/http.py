@@ -51,3 +51,13 @@ def jira_get(cfg, path, params=None):
 def jira_post(cfg, path, data):
     """POST JSON data to Jira REST API v2."""
     return _request(cfg, "POST", path, data=data)
+
+
+def jira_put(cfg, path, data):
+    """PUT JSON data to Jira REST API v2."""
+    return _request(cfg, "PUT", path, data=data)
+
+
+def jira_delete(cfg, path):
+    """DELETE request to Jira REST API v2."""
+    return _request(cfg, "DELETE", path)

@@ -12,13 +12,17 @@ _COMPLETION_COMMANDS = [
 ]
 
 _COMPLETION_SUBCOMMANDS = {
-    "issue": ["comments", "comment", "add-comment"],
+    "issue": ["comments", "comment", "add-comment", "update-description", "transition", "assign", "edit-comment"],
     "completion": ["bash", "zsh", "fish"],
 }
 
 _COMPLETION_FLAGS = {
     "search": ["--limit", "--saved", "--list-filters", "--format"],
     "issue": ["--limit", "--page", "--desc", "--format", "--body"],
+    "issue-update-description": ["--body"],
+    "issue-transition": [],
+    "issue-assign": [],
+    "issue-edit-comment": ["--body"],
 }
 
 

@@ -14,6 +14,10 @@ from jira_cli.commands import (
     cmd_issue_comment,
     cmd_issue_add_comment,
     cmd_setup,
+    cmd_issue_update_description,
+    cmd_issue_update_status,
+    cmd_issue_assign,
+    cmd_issue_update_comment,
 )
 from jira_cli.completion import cmd_completion
 
@@ -158,8 +162,47 @@ def main():
             rest, flags = parse_flags(sub_args)
             return cmd_issue_add_comment(cfg, issue_key, flags["body"])
 
+        # issue <key> update-description
+        if sub == "update-description":
+            if has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> update-description --body <text>", file=sys.stderr)
+                sys.exit(0)
+            rest, flags = parse_flags(sub_args)
+            if not flags.get("body"):
+                print("Error: --body <text> is required.", file=sys.stderr)
+                sys.exit(1)
+            return cmd_issue_update_description(cfg, issue_key, flags["body"])
+
+        # issue <key> transition <id|name>
+        if sub == "transition":
+            if not sub_args or has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> transition <transition-id-or-name>", file=sys.stderr)
+                sys.exit(1) if not sub_args else print_help("issue")
+                return
+            return cmd_issue_update_status(cfg, issue_key, sub_args[0])
+
+        # issue <key> assign <username>
+        if sub == "assign":
+            if not sub_args or has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> assign <username>", file=sys.stderr)
+                if not sub_args:
+                    sys.exit(1)
+                print_help("issue")
+                return
+            return cmd_issue_assign(cfg, issue_key, sub_args[0])
+
+        # issue <key> edit-comment <id>
+        if sub == "edit-comment":
+            if not sub_args or has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> edit-comment <comment-id> --body <text>", file=sys.stderr)
+                sys.exit(1) if not sub_args else print_help("issue")
+                return
+            cmt_id = sub_args[0]
+            rest, flags = parse_flags(sub_args[1:])
+            return cmd_issue_update_comment(cfg, issue_key, cmt_id, flags.get("body", ""))
+
         print(f"Unknown issue subcommand: {sub}", file=sys.stderr)
-        print("Subcommands: comments, comment <id>, add-comment", file=sys.stderr)
+        print("Subcommands: comments, comment <id>, add-comment, update-description, transition, assign, edit-comment", file=sys.stderr)
         sys.exit(1)
 
     # --- unknown ---

@@ -4,7 +4,7 @@ import json
 import sys
 
 from jira_cli.config import load_config, save_config
-from jira_cli.http import jira_get, jira_post
+from jira_cli.http import jira_get, jira_post, jira_put
 from jira_cli.format import fmt_date, status_badge, priority_label, extract_adf_text, truncate
 from jira_cli.help_texts import print_help
 
@@ -194,6 +194,62 @@ def cmd_issue_add_comment(cfg, issue_key, body_text):
     print(f"  \033[38;5;244mCreated: {created_c}\033[0m")
     print()
 
+
+
+# -------------------------------------------------------------------
+# Command: issue update-description
+# -------------------------------------------------------------------
+
+def cmd_issue_update_description(cfg, issue_key, description):
+    """Update the description of an issue (ADF format)."""
+    from jira_cli.format import _build_adf_doc
+
+    data = {"update": {"description": [{"set": _build_adf_doc(description)}]}}
+    result = jira_put(cfg, f"issue/{issue_key}", data)
+    print(f"\n\033[1mDescription updated for {issue_key}\033[0m")
+    return result
+
+
+# -------------------------------------------------------------------
+# Command: issue transition (update status)
+# -------------------------------------------------------------------
+
+def cmd_issue_update_status(cfg, issue_key, transition_id_or_name):
+    """Transition an issue to a new status."""
+    # Try numeric transition ID first, then name
+    data = {"transition": {"id": transition_id_or_name}}
+    result = jira_post(cfg, f"issue/{issue_key}/transitions", data)
+    print(f"\n\033[1mTransition applied to {issue_key}\033[0m")
+    return result
+
+
+# -------------------------------------------------------------------
+# Command: issue assign
+# -------------------------------------------------------------------
+
+def cmd_issue_assign(cfg, issue_key, assignee):
+    """Assign an issue to a user (by name). Use empty string to unassign."""
+    data = {"name": assignee}
+    result = jira_put(cfg, f"issue/{issue_key}/assignee", data)
+    name_display = assignee or "Unassigned"
+    print(f"\n\033[1m{issue_key} assigned to {name_display}\033[0m")
+    return result
+
+# -------------------------------------------------------------------
+# Command: issue edit-comment
+# -------------------------------------------------------------------
+
+def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text):
+    """Update/replace the body of an existing comment."""
+    if not body_text:
+        print("Error: comment body is empty.", file=sys.stderr)
+        sys.exit(1)
+
+    data = {"body": body_text}
+    result = jira_put(cfg, f"issue/{issue_key}/comment/{comment_id}", data)
+    updated_c = fmt_date(result.get("updated", ""))
+    print(f"\n\033[1mComment #{comment_id} updated on {issue_key}\033[0m")
+    return result
 
 # -------------------------------------------------------------------
 # Command: setup

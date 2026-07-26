@@ -82,3 +82,21 @@ def truncate(text, maxlen=COMMENT_TRUNCATE):
     if len(text) <= maxlen:
         return text
     return text[:maxlen].rsplit(" ", 1)[0] + " \u2026"
+
+
+def _build_adf_doc(text: str) -> dict:
+    """Build an Atlassian Document Format (ADF) doc from plain text."""
+    if not text or not text.strip():
+        return {"version": 1, "type": "doc", "content": []}
+    lines = text.strip().split("\n")
+    content = []
+    for line in lines:
+        content.append({
+            "type": "paragraph",
+            "content": [{"type": "text", "text": line}],
+        })
+    return {
+        "version": 1,
+        "type": "doc",
+        "content": content,
+    }
