@@ -14,10 +14,11 @@ from jira_cli.commands import (
     cmd_issue_comment,
     cmd_issue_add_comment,
     cmd_setup,
-    cmd_issue_update_description,
     cmd_issue_update_status,
-    cmd_issue_assign,
     cmd_issue_update_comment,
+    cmd_create_issue,
+    cmd_link_issues,
+    cmd_issue_update,
 )
 from jira_cli.completion import cmd_completion
 
@@ -25,7 +26,7 @@ from jira_cli.completion import cmd_completion
 def print_usage_err():
     """Print short usage to stderr."""
     print("Usage: jira-cli <command> [args...] [-h]", file=sys.stderr)
-    print("Commands: projects, search, issue, setup, help, completion", file=sys.stderr)
+    print("Commands: projects, search, issue, create, link, setup, help, completion", file=sys.stderr)
 
 
 def main():
@@ -33,7 +34,7 @@ def main():
     cfg = load_config()
 
     # Config check — skip for setup and help
-    needs_config = {"projects", "search", "issue"}
+    needs_config = {"projects", "search", "issue", "create", "link"}
     cmd = sys.argv[1] if len(sys.argv) > 1 else None
     if cmd not in ("setup", "help", "completion", None):
         if not cfg.get("url") or not cfg.get("user") or not cfg.get("pass"):
@@ -44,7 +45,7 @@ def main():
 
     if len(sys.argv) < 2:
         print("Usage: jira-cli <command> [args...] [-h]")
-        print("Commands: projects, search, issue, setup, help, completion")
+        print("Commands: projects, search, issue, create, link, setup, help, completion")
         return
 
     cmd = sys.argv[1]
@@ -107,6 +108,48 @@ def main():
             sys.exit(1)
         return cmd_search(cfg, jql, flags["limit"], flags["format"])
 
+    # --- create ---
+    if cmd == "create":
+        if has_help_flag(args):
+            print_help("create")
+            return
+        rest, flags = parse_flags(args)
+        if not flags.get("project") or not flags.get("summary"):
+            print("Usage: jira-cli create --project <KEY> --summary \"<text>\" [--type <type>] [--description <text>] [--priority <p>] [--assignee <user>] [--format json]", file=sys.stderr)
+            sys.exit(1)
+        return cmd_create_issue(
+            cfg,
+            flags["project"],
+            flags["summary"],
+            issue_type=flags.get("type") or "Task",
+            description=flags.get("description"),
+            priority=flags.get("priority"),
+            assignee=flags.get("assignee"),
+            fmt=flags["format"],
+        )
+
+    # --- link ---
+    if cmd == "link":
+        if has_help_flag(args):
+            print_help("link")
+            return
+        if not args:
+            print("Usage: jira-cli link <outward-key> <inward-key> [--type <link-type>] [--comment <text>]", file=sys.stderr)
+            sys.exit(1)
+        outward = args[0].upper()
+        inward = args[1].upper() if len(args) > 1 else None
+        if inward is None:
+            print("Usage: jira-cli link <outward-key> <inward-key> [--type <link-type>] [--comment <text>]", file=sys.stderr)
+            sys.exit(1)
+        rest, flags = parse_flags(args[2:])
+        return cmd_link_issues(
+            cfg,
+            outward,
+            inward,
+            link_type=flags.get("link_type") or "Relates",
+            comment=flags.get("comment"),
+        )
+
     # --- issue ---
     if cmd == "issue":
         if has_help_flag(args):
@@ -162,17 +205,6 @@ def main():
             rest, flags = parse_flags(sub_args)
             return cmd_issue_add_comment(cfg, issue_key, flags["body"])
 
-        # issue <key> update-description
-        if sub == "update-description":
-            if has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> update-description --body <text>", file=sys.stderr)
-                sys.exit(0)
-            rest, flags = parse_flags(sub_args)
-            if not flags.get("body"):
-                print("Error: --body <text> is required.", file=sys.stderr)
-                sys.exit(1)
-            return cmd_issue_update_description(cfg, issue_key, flags["body"])
-
         # issue <key> transition <id|name>
         if sub == "transition":
             if not sub_args or has_help_flag(sub_args):
@@ -180,16 +212,6 @@ def main():
                 sys.exit(1) if not sub_args else print_help("issue")
                 return
             return cmd_issue_update_status(cfg, issue_key, sub_args[0])
-
-        # issue <key> assign <username>
-        if sub == "assign":
-            if not sub_args or has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> assign <username>", file=sys.stderr)
-                if not sub_args:
-                    sys.exit(1)
-                print_help("issue")
-                return
-            return cmd_issue_assign(cfg, issue_key, sub_args[0])
 
         # issue <key> edit-comment <id>
         if sub == "edit-comment":
@@ -201,8 +223,22 @@ def main():
             rest, flags = parse_flags(sub_args[1:])
             return cmd_issue_update_comment(cfg, issue_key, cmt_id, flags.get("body", ""))
 
+        # issue <key> update
+        if sub == "update":
+            if has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> update [--summary <text>] [--description <text>] [--priority <p>] [--assignee <user>]", file=sys.stderr)
+                sys.exit(0)
+            rest, flags = parse_flags(sub_args)
+            return cmd_issue_update(
+                cfg, issue_key,
+                summary=flags.get("summary"),
+                description=flags.get("description"),
+                priority=flags.get("priority"),
+                assignee=flags.get("assignee"),
+            )
+
         print(f"Unknown issue subcommand: {sub}", file=sys.stderr)
-        print("Subcommands: comments, comment <id>, add-comment, update-description, transition, assign, edit-comment", file=sys.stderr)
+        print("Subcommands: comments, comment <id>, add-comment, update, transition, edit-comment", file=sys.stderr)
         sys.exit(1)
 
     # --- unknown ---

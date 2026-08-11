@@ -3,7 +3,9 @@
 
 def parse_flags(args, known=()):
     """
-    Scan args for --limit, --page, --format, --desc, --saved, --body flags.
+    Scan args for --limit, --page, --format, --desc, --saved, --body flags,
+    plus create/update flags (--project, --summary, --description, --type,
+    --priority, --assignee, --link-type, --comment).
     known: additional flags to accept (e.g. ('--body',)).
     Returns (remaining_args, dict).
     """
@@ -14,6 +16,14 @@ def parse_flags(args, known=()):
     saved = []
     body = None
     list_filters = False
+    project = None
+    summary = None
+    description = None
+    issue_type = None
+    priority = None
+    assignee = None
+    link_type = None
+    comment = None
     rest = []
     i = 0
     while i < len(args):
@@ -42,10 +52,40 @@ def parse_flags(args, known=()):
         elif a == "--body" and i + 1 < len(args):
             body = args[i + 1]
             i += 2
+        elif a == "--project" and i + 1 < len(args):
+            project = args[i + 1]
+            i += 2
+        elif a == "--summary" and i + 1 < len(args):
+            summary = args[i + 1]
+            i += 2
+        elif a == "--description" and i + 1 < len(args):
+            description = args[i + 1]
+            i += 2
+        elif a == "--type" and i + 1 < len(args):
+            issue_type = args[i + 1]
+            i += 2
+        elif a == "--priority" and i + 1 < len(args):
+            priority = args[i + 1]
+            i += 2
+        elif a == "--assignee" and i + 1 < len(args):
+            assignee = args[i + 1]
+            i += 2
+        elif a == "--link-type" and i + 1 < len(args):
+            link_type = args[i + 1]
+            i += 2
+        elif a == "--comment" and i + 1 < len(args):
+            comment = args[i + 1]
+            i += 2
         else:
             rest.append(a)
             i += 1
-    return rest, {"limit": limit, "page": page, "format": fmt, "desc": desc, "saved": saved, "body": body, "list_filters": list_filters}
+    return rest, {
+        "limit": limit, "page": page, "format": fmt, "desc": desc, "saved": saved,
+        "body": body, "list_filters": list_filters, "project": project,
+        "summary": summary, "description": description, "type": issue_type,
+        "priority": priority, "assignee": assignee, "link_type": link_type,
+        "comment": comment,
+    }
 
 
 def has_help_flag(args):

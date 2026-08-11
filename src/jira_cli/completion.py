@@ -5,6 +5,8 @@ import shlex
 _COMPLETION_COMMANDS = [
     "projects",
     "search",
+    "create",
+    "link",
     "issue",
     "setup",
     "help",
@@ -12,16 +14,17 @@ _COMPLETION_COMMANDS = [
 ]
 
 _COMPLETION_SUBCOMMANDS = {
-    "issue": ["comments", "comment", "add-comment", "update-description", "transition", "assign", "edit-comment"],
+    "issue": ["comments", "comment", "add-comment", "update", "transition", "edit-comment"],
     "completion": ["bash", "zsh", "fish"],
 }
 
 _COMPLETION_FLAGS = {
     "search": ["--limit", "--saved", "--list-filters", "--format"],
     "issue": ["--limit", "--page", "--desc", "--format", "--body"],
-    "issue-update-description": ["--body"],
+    "create": ["--project", "--summary", "--type", "--description", "--priority", "--assignee", "--format"],
+    "link": ["--type", "--comment"],
+    "issue-update": ["--summary", "--description", "--priority", "--assignee"],
     "issue-transition": [],
-    "issue-assign": [],
     "issue-edit-comment": ["--body"],
 }
 
@@ -69,12 +72,15 @@ _jira_cli()
                     COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
                 fi
             elif [[ $cword -eq 3 ]]; then
-                local subs="comments comment add-comment"
+                local subs="comments comment add-comment update transition edit-comment"
                 COMPREPLY=($(compgen -W "$subs" -- "$cur"))
             elif [[ $cword -ge 4 ]]; then
                 case "${{words[3]}}" in
                     comments)
                         COMPREPLY=($(compgen -W "--limit --page --desc --format --help -h" -- "$cur"))
+                        ;;
+                    update)
+                        COMPREPLY=($(compgen -W "--summary --description --priority --assignee --help -h" -- "$cur"))
                         ;;
                     comment)
                         if [[ "$cur" != -* ]]; then
@@ -114,6 +120,8 @@ _jira_cli_commands() {
     commands=(
         'projects:List all projects'
         'search:Search issues with JQL or saved filters'
+        'create:Create a new issue'
+        'link:Link two issues'
         'issue:Show issue detail and work with comments'
         'setup:Configure Jira credentials'
         'help:Print help text'
@@ -128,6 +136,7 @@ _jira_cli_issue_sub() {
         'comments:List paginated comments'
         'comment:Show full comment detail'
         'add-comment:Add a comment to an issue'
+        'update:Update summary/description/priority/assignee'
     )
     _describe -t subcommands 'subcommand' subs
 }
@@ -162,6 +171,24 @@ _jira_cli() {
                         '--format=[Output format]:format:(table json)' \\
                         '*:JQL string'
                     ;;
+                create)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '--project=[Project key]:key' \\
+                        '--summary=[Issue summary]:text' \\
+                        '--type=[Issue type]:type:(Task Bug Story Epic)' \\
+                        '--description=[Issue description]:text' \\
+                        '--priority=[Priority]:priority:(Highest High Medium Low Lowest)' \\
+                        '--assignee=[Assignee username]:user' \\
+                        '--format=[Output format]:format:(table json)'
+                    ;;
+                link)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '--type=[Link type]:type:(Relates Blocks Duplicate)' \\
+                        '--comment=[Link comment]:text' \\
+                        '*:issue keys'
+                    ;;
                 issue)
                     if [[ $CURRENT -eq 3 ]]; then
                         _arguments '(-h --help)'{-h,--help}'[Show help]'
@@ -183,10 +210,18 @@ _jira_cli() {
                     '--format=[Output format]:format:(table json)' \\
                     '*:comment ID'
                 ;;
-            add-comment)
+add-comment)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '--body=[Comment body text]:text'
+                ;;
+            update)
                 _arguments \\
                     '(-h --help)'{-h,--help}'[Show help]' \\
-                    '--body=[Comment body text]:text'
+                    '--summary=[New summary]:text' \\
+                    '--description=[New description]:text' \\
+                    '--priority=[Priority]:priority:(Highest High Medium Low Lowest)' \\
+                    '--assignee=[Assignee username]:user'
                 ;;
                         esac
                     fi
@@ -248,10 +283,26 @@ complete -c jira-cli -f -n '__fish_jira_cli_using_command search' -l saved -d 'S
 complete -c jira-cli -f -n '__fish_jira_cli_using_command search' -l list-filters -d 'List saved filters'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command search' -l format -d 'Output format' -xa 'table json'
 
+# create flags
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -s h -l help -d 'Show help'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l project -d 'Project key'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l summary -d 'Issue summary'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l type -d 'Issue type' -xa 'Task Bug Story Epic'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l description -d 'Issue description'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l priority -d 'Priority' -xa 'Highest High Medium Low Lowest'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l assignee -d 'Assignee username'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command create' -l format -d 'Output format' -xa 'table json'
+
+# link flags
+complete -c jira-cli -f -n '__fish_jira_cli_using_command link' -s h -l help -d 'Show help'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command link' -l type -d 'Link type' -xa 'Relates Blocks Duplicate'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command link' -l comment -d 'Link comment'
+
 # issue subcommands
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a comments -d 'List paginated comments'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'comment' -d 'Show full comment detail'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'add-comment' -d 'Add a comment'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'update' -d 'Update summary/description/priority/assignee'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -s h -l help -d 'Show help'
 
 # issue comments flags
@@ -268,6 +319,13 @@ complete -c jira-cli -f -n '__fish_jira_cli_using_command comment' -l format -d 
 # issue add-comment flags
 complete -c jira-cli -f -n '__fish_jira_cli_using_command add-comment' -s h -l help -d 'Show help'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command add-comment' -l body -d 'Comment body text'
+
+# issue update flags
+complete -c jira-cli -f -n '__fish_jira_cli_using_command update' -s h -l help -d 'Show help'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command update' -l summary -d 'New summary'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command update' -l description -d 'New description'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command update' -l priority -d 'Priority' -xa 'Highest High Medium Low Lowest'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command update' -l assignee -d 'Assignee username'
 
 # completion subcommand
 complete -c jira-cli -f -n '__fish_jira_cli_using_command completion' -a bash -d 'Bash completions'

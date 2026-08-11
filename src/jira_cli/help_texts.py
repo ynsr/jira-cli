@@ -9,13 +9,14 @@ HELP["main"] = """JIRA-CLI HELP — AI-agent friendly
 COMMANDS:
   projects                    List all projects
   search <jql> [flags]        Search issues with JQL + saved filters
+  create                      Create a new issue
+  link <KEY> <KEY>            Link two issues
   issue <KEY>                 Show issue detail + latest comment
   issue <KEY> comments        Paginated comment list (truncated text)
   issue <KEY> comment <ID>    Full single comment detail
   issue <KEY> add-comment     Add a comment
-  issue <KEY> update-description  Update issue description (--body)
+  issue <KEY> update          Update summary/description/priority/assignee
   issue <KEY> transition <ID>     Transition issue to a new status
-  issue <KEY> assign <USER>       Assign/reassign issue
   issue <KEY> edit-comment <ID>   Edit an existing comment body
   setup                       Configure credentials
   completion <shell>          Print a shell completion script (bash, zsh, fish)
@@ -30,9 +31,11 @@ EXAMPLES:
   jira-cli issue PROJ-123 comments --limit 5 --desc
   jira-cli issue PROJ-123 comment 12345
   jira-cli issue PROJ-123 add-comment --body "Looking into this"
-  jira-cli issue PROJ-123 update-description --body "New description text"
+  jira-cli create --project BANKING --summary "Fix bug" --type Bug --priority High
+  jira-cli link BANKING-123 BANKING-456 --type Relates --comment "Blocks"
+  jira-cli issue PROJ-123 update --summary "New title" --priority High --assignee jane.doe
+  jira-cli issue PROJ-123 update --description "New description text"
   jira-cli issue PROJ-123 transition 41
-  jira-cli issue PROJ-123 assign jane.doe
   jira-cli issue PROJ-123 edit-comment 12345 --body "Updated comment"
   jira-cli completion bash
 
@@ -76,6 +79,7 @@ Usage:
   jira-cli issue <KEY> comments [flags]        List paginated comments (truncated)
   jira-cli issue <KEY> comment <ID>            Show full single comment
   jira-cli issue <KEY> add-comment [--body <text>]  Add a comment
+  jira-cli issue <KEY> update [flags]               Update fields (summary/description/priority/assignee)
   jira-cli issue <KEY> -h                      This help text
 
 Flags for 'comments' subcommand:
@@ -87,11 +91,18 @@ Flags for 'comments' subcommand:
 Flags for 'add-comment' subcommand:
   --body <text>       Comment body text (omit to read from stdin until Ctrl+D)
 
+Flags for 'update' subcommand:
+  --summary <text>    New summary/title
+  --description <text>  New description (plain text)
+  --priority <name>   New priority (e.g. High, Medium, Low)
+  --assignee <user>   New assignee (by username; empty string to unassign)
+
 EXAMPLES:
   jira-cli issue PROJ-123                                        # detail + latest comment
   jira-cli issue PROJ-123 comments --limit 10 --page 2 --desc    # paginated comments
   jira-cli issue PROJ-123 comment 54321                          # full comment detail
   jira-cli issue PROJ-123 add-comment --body "Working on this"   # add comment
+  jira-cli issue PROJ-123 update --summary "New title" --priority High
   echo "Done" | jira-cli issue PROJ-123 add-comment              # add from stdin
 """
 
@@ -104,6 +115,43 @@ Output: table with Key, Name, Lead, Type columns.
 
 EXAMPLE:
   jira-cli projects
+"""
+
+HELP["create"] = """jira-cli create — create a new issue
+
+Usage:
+  jira-cli create --project <KEY> --summary "<text>" [flags]
+
+Required:
+  --project <KEY>         Project key (e.g. BANKING)
+  --summary "<text>"      Issue summary/title
+
+Optional:
+  --type <name>           Issue type (default: Task; e.g. Bug, Story, Epic)
+  --description "<text>"  Issue description (plain text)
+  --priority <name>       Priority (e.g. Highest, High, Medium, Low, Lowest)
+  --assignee <user>       Assignee username (empty string to leave unassigned)
+  --format <fmt>          Output: table (default) or json
+
+EXAMPLES:
+  jira-cli create --project BANKING --summary "Fix login bug" --type Bug --priority High
+  jira-cli create --project BANKING --summary "Write docs" --description "Add README" --format json
+"""
+
+HELP["link"] = """jira-cli link — link two issues
+
+Usage:
+  jira-cli link <outward-key> <inward-key> [--type <link-type>] [--comment <text>]
+
+Args:
+  <outward-key>       First issue key (outward side of the link)
+  <inward-key>        Second issue key (inward side of the link)
+  --type <link-type>  Link type name (default: Relates; e.g. Blocks, Duplicate)
+  --comment <text>    Optional comment attached to the link (outward issue)
+
+EXAMPLES:
+  jira-cli link BANKING-123 BANKING-456
+  jira-cli link BANKING-123 BANKING-456 --type Blocks --comment "Depends on fix"
 """
 
 HELP["setup"] = """jira-cli setup — configure Jira credentials

@@ -197,20 +197,6 @@ def cmd_issue_add_comment(cfg, issue_key, body_text):
 
 
 # -------------------------------------------------------------------
-# Command: issue update-description
-# -------------------------------------------------------------------
-
-def cmd_issue_update_description(cfg, issue_key, description):
-    """Update the description of an issue (ADF format)."""
-    from jira_cli.format import _build_adf_doc
-
-    data = {"update": {"description": [{"set": _build_adf_doc(description)}]}}
-    result = jira_put(cfg, f"issue/{issue_key}", data)
-    print(f"\n\033[1mDescription updated for {issue_key}\033[0m")
-    return result
-
-
-# -------------------------------------------------------------------
 # Command: issue transition (update status)
 # -------------------------------------------------------------------
 
@@ -222,18 +208,6 @@ def cmd_issue_update_status(cfg, issue_key, transition_id_or_name):
     print(f"\n\033[1mTransition applied to {issue_key}\033[0m")
     return result
 
-
-# -------------------------------------------------------------------
-# Command: issue assign
-# -------------------------------------------------------------------
-
-def cmd_issue_assign(cfg, issue_key, assignee):
-    """Assign an issue to a user (by name). Use empty string to unassign."""
-    data = {"name": assignee}
-    result = jira_put(cfg, f"issue/{issue_key}/assignee", data)
-    name_display = assignee or "Unassigned"
-    print(f"\n\033[1m{issue_key} assigned to {name_display}\033[0m")
-    return result
 
 # -------------------------------------------------------------------
 # Command: issue edit-comment
@@ -249,6 +223,85 @@ def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text):
     result = jira_put(cfg, f"issue/{issue_key}/comment/{comment_id}", data)
     updated_c = fmt_date(result.get("updated", ""))
     print(f"\n\033[1mComment #{comment_id} updated on {issue_key}\033[0m")
+    return result
+
+# -------------------------------------------------------------------
+# Command: create issue
+# -------------------------------------------------------------------
+
+def cmd_create_issue(cfg, project, summary, issue_type="Task", description=None,
+                     priority=None, assignee=None, fmt="table"):
+    """Create a new issue. Returns the created issue dict."""
+    from jira_cli.format import _build_adf_doc
+
+    fields = {
+        "project": {"key": project},
+        "summary": summary,
+        "issuetype": {"name": issue_type},
+    }
+    if description is not None:
+        fields["description"] = _build_adf_doc(description)
+    if priority:
+        fields["priority"] = {"name": priority}
+    if assignee is not None:
+        # Empty string means unassigned; otherwise assign by name.
+        fields["assignee"] = {"name": assignee}
+
+    data = jira_post(cfg, "issue", {"fields": fields})
+    key = data.get("key", "?")
+    if fmt == "json":
+        print(json.dumps(data, indent=2))
+        return data
+    print(f"\n\033[1mCreated \033[0m\033[1m{key}\033[0m")
+    print(f"  {cfg['url']}/browse/{key}")
+    return data
+
+
+# -------------------------------------------------------------------
+# Command: link issues
+# -------------------------------------------------------------------
+
+def cmd_link_issues(cfg, outward_key, inward_key, link_type="Relates", comment=None):
+    """Create a link between two issues. Returns {} on success."""
+    payload = {
+        "type": {"name": link_type},
+        "inwardIssue": {"key": inward_key},
+        "outwardIssue": {"key": outward_key},
+    }
+    if comment:
+        payload["comment"] = {"body": comment}
+
+    result = jira_post(cfg, "issueLink", payload)
+    print(f"\n\033[1mLinked {outward_key} \u2194 {inward_key} ({link_type})\033[0m")
+    return result
+
+
+# -------------------------------------------------------------------
+# Command: issue update (general field update)
+# -------------------------------------------------------------------
+
+def cmd_issue_update(cfg, issue_key, summary=None, description=None,
+                     priority=None, assignee=None):
+    """Update editable fields of an issue (summary/description/priority/assignee)."""
+    from jira_cli.format import _build_adf_doc
+
+    fields = {}
+    if summary is not None:
+        fields["summary"] = summary
+    if description is not None:
+        fields["description"] = _build_adf_doc(description)
+    if priority is not None:
+        fields["priority"] = {"name": priority}
+    if assignee is not None:
+        fields["assignee"] = {"name": assignee}
+
+    if not fields:
+        print("Error: nothing to update. Use --summary, --description, --priority, or --assignee.", file=sys.stderr)
+        sys.exit(1)
+
+    result = jira_put(cfg, f"issue/{issue_key}", {"fields": fields})
+    changed = ", ".join(fields.keys())
+    print(f"\n\033[1mUpdated {issue_key}: {changed}\033[0m")
     return result
 
 # -------------------------------------------------------------------

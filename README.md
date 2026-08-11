@@ -30,7 +30,9 @@ jira-cli <command> [args...] [-h] [flags]
 |-------------|---------------------------------------------|
 | `projects`  | List all projects                           |
 | `search`    | Search issues with JQL or saved filters     |
-| `issue`     | Issue detail, comments, add-comment         |
+| `create`    | Create a new issue                          |
+| `link`      | Link two issues                             |
+| `issue`     | Issue detail, comments, add-comment, update |
 | `setup`     | Configure Jira credentials                  |
 | `help`      | Print help text (AI-agent friendly)         |
 | `completion`| Print shell completion script               |
@@ -47,6 +49,10 @@ jira-cli issue PROJ-123
 jira-cli issue PROJ-123 comments --limit 10 --desc
 jira-cli issue PROJ-123 comment 54321
 jira-cli issue PROJ-123 add-comment --body "Working on this"
+jira-cli issue PROJ-123 update --summary "New title" --priority High
+jira-cli issue PROJ-123 update --description "New description" --assignee jane.doe
+jira-cli create --project BANKING --summary "Fix bug" --type Bug --priority High
+jira-cli link BANKING-123 BANKING-456 --type Blocks --comment "Depends on this"
 jira-cli completion bash
 jira-cli completion zsh
 jira-cli completion fish

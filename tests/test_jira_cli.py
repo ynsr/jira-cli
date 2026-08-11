@@ -359,34 +359,6 @@ class TestFormat:
 # -------------------------------------------------------------------
 
 
-class TestCommandsUpdateDescription:
-    def test_updates_description(self, monkeypatch):
-        from jira_cli.commands import cmd_issue_update_description
-
-        mock_put = MagicMock(return_value={})
-        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
-
-        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update_description(cfg, "PROJ-123", "New desc")
-
-        mock_put.assert_called_once()
-        payload = mock_put.call_args[0][2]
-        assert payload["update"]["description"][0]["set"]["type"] == "doc"
-
-    def test_updates_description_empty_body(self, monkeypatch):
-        from jira_cli.commands import cmd_issue_update_description
-
-        mock_put = MagicMock(return_value={})
-        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
-
-        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update_description(cfg, "PROJ-123", "")
-
-        mock_put.assert_called_once()
-        payload = mock_put.call_args[0][2]
-        assert payload["update"]["description"][0]["set"]["content"] == []
-
-
 class TestCommandsUpdateStatus:
     def test_transition_by_id(self, monkeypatch):
         from jira_cli.commands import cmd_issue_update_status
@@ -400,29 +372,6 @@ class TestCommandsUpdateStatus:
         mock_post.assert_called_once_with(
             cfg, "issue/PROJ-123/transitions", {"transition": {"id": "41"}}
         )
-
-
-class TestCommandsAssign:
-    def test_assign_user(self, monkeypatch):
-        from jira_cli.commands import cmd_issue_assign
-
-        mock_put = MagicMock(return_value={})
-        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
-
-        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_assign(cfg, "PROJ-123", "jane.doe")
-
-        mock_put.assert_called_once_with(cfg, "issue/PROJ-123/assignee", {"name": "jane.doe"})
-
-    def test_assign_unassign(self, monkeypatch):
-        from jira_cli.commands import cmd_issue_assign
-
-        mock_put = MagicMock(return_value={})
-        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
-
-        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_assign(cfg, "PROJ-123", "")
-        mock_put.assert_called_once_with(cfg, "issue/PROJ-123/assignee", {"name": ""})
 
 
 class TestCommandsUpdateComment:
@@ -443,6 +392,128 @@ class TestCommandsUpdateComment:
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
         with pytest.raises(SystemExit):
             cmd_issue_update_comment(cfg, "PROJ-123", "54321", "")
+
+
+class TestCommandsCreateIssue:
+    def test_create_basic(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_create_issue
+
+        mock_post = MagicMock(return_value={"key": "PROJ-456", "id": "456"})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_create_issue(cfg, "PROJ", "My new issue")
+
+        payload = mock_post.call_args[0][2]
+        assert payload["fields"]["project"] == {"key": "PROJ"}
+        assert payload["fields"]["summary"] == "My new issue"
+        assert payload["fields"]["issuetype"] == {"name": "Task"}
+        captured = capsys.readouterr()
+        assert "PROJ-456" in captured.out
+
+    def test_create_full_options(self, monkeypatch):
+        from jira_cli.commands import cmd_create_issue
+
+        mock_post = MagicMock(return_value={"key": "PROJ-457", "id": "457"})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_create_issue(
+            cfg, "PROJ", "Bug summary", issue_type="Bug",
+            description="Some description", priority="High", assignee="jane.doe",
+        )
+
+        payload = mock_post.call_args[0][2]
+        fields = payload["fields"]
+        assert fields["issuetype"] == {"name": "Bug"}
+        assert fields["priority"] == {"name": "High"}
+        assert fields["assignee"] == {"name": "jane.doe"}
+        assert fields["description"]["type"] == "doc"
+
+    def test_create_json_format(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_create_issue
+
+        mock_post = MagicMock(return_value={"key": "PROJ-458", "id": "458"})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_create_issue(cfg, "PROJ", "Summary", fmt="json")
+        captured = capsys.readouterr()
+        assert '"key": "PROJ-458"' in captured.out
+
+
+class TestCommandsLinkIssues:
+    def test_link_basic(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_link_issues
+
+        mock_post = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_link_issues(cfg, "PROJ-123", "PROJ-456")
+
+        expected = {
+            "type": {"name": "Relates"},
+            "inwardIssue": {"key": "PROJ-456"},
+            "outwardIssue": {"key": "PROJ-123"},
+        }
+        mock_post.assert_called_once_with(cfg, "issueLink", expected)
+        captured = capsys.readouterr()
+        assert "PROJ-123" in captured.out and "PROJ-456" in captured.out
+
+    def test_link_with_type_and_comment(self, monkeypatch):
+        from jira_cli.commands import cmd_link_issues
+
+        mock_post = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_link_issues(cfg, "PROJ-123", "PROJ-456", link_type="Blocks", comment="Depends on fix")
+
+        payload = mock_post.call_args[0][2]
+        assert payload["type"] == {"name": "Blocks"}
+        assert payload["comment"] == {"body": "Depends on fix"}
+
+
+class TestCommandsUpdateIssue:
+    def test_update_all_fields(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(
+            cfg, "PROJ-123", summary="New title", description="New desc",
+            priority="High", assignee="jane.doe",
+        )
+
+        payload = mock_put.call_args[0][2]
+        fields = payload["fields"]
+        assert fields["summary"] == "New title"
+        assert fields["priority"] == {"name": "High"}
+        assert fields["assignee"] == {"name": "jane.doe"}
+        assert fields["description"]["type"] == "doc"
+
+    def test_update_single_field(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(cfg, "PROJ-123", summary="Only title")
+        payload = mock_put.call_args[0][2]
+        assert payload["fields"] == {"summary": "Only title"}
+
+    def test_update_no_fields_exits(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_update
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit):
+            cmd_issue_update(cfg, "PROJ-123")
+        captured = capsys.readouterr()
+        assert "nothing to update" in captured.err
 
 
 class TestCommandsLegacy:
@@ -558,12 +629,12 @@ class TestCommandsLegacy:
     def test_issue_comment_functions_exist(self):
         from jira_cli.commands import (
             cmd_issue, cmd_issue_comments, cmd_issue_comment, cmd_issue_add_comment,
-            cmd_issue_update_description, cmd_issue_update_status, cmd_issue_assign,
-            cmd_issue_update_comment, cmd_projects, cmd_search, cmd_setup,
+            cmd_issue_update_status, cmd_issue_update_comment, cmd_projects,
+            cmd_search, cmd_setup, cmd_create_issue, cmd_link_issues, cmd_issue_update,
         )
         for fn in [cmd_issue, cmd_issue_comments, cmd_issue_comment, cmd_issue_add_comment,
-                   cmd_issue_update_description, cmd_issue_update_status, cmd_issue_assign,
-                   cmd_issue_update_comment, cmd_projects, cmd_search, cmd_setup]:
+                   cmd_issue_update_status, cmd_issue_update_comment, cmd_projects,
+                   cmd_search, cmd_setup, cmd_create_issue, cmd_link_issues, cmd_issue_update]:
             assert callable(fn)
 
 
@@ -647,6 +718,25 @@ class TestFlags:
         j = build_jql(["blocked"], [])
         assert "status=Blocked" in j
 
+    def test_parse_flags_create(self):
+        from jira_cli.flags import parse_flags
+        r, f = parse_flags([
+            "--project", "BANKING", "--summary", "Fix bug", "--type", "Bug",
+            "--description", "Some desc", "--priority", "High", "--assignee", "jane.doe",
+        ])
+        assert f["project"] == "BANKING"
+        assert f["summary"] == "Fix bug"
+        assert f["type"] == "Bug"
+        assert f["description"] == "Some desc"
+        assert f["priority"] == "High"
+        assert f["assignee"] == "jane.doe"
+
+    def test_parse_flags_link(self):
+        from jira_cli.flags import parse_flags
+        r, f = parse_flags(["--link-type", "Blocks", "--comment", "Depends"])
+        assert f["link_type"] == "Blocks"
+        assert f["comment"] == "Depends"
+
 
 # -------------------------------------------------------------------
 # CLI Dispatch
@@ -727,34 +817,10 @@ class TestCLIDispatch:
         main()
         mock_cmd.assert_called_once()
 
-    def test_main_issue_update_description(self, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "update-description", "--body", "New desc"])
-        mock_cmd = MagicMock()
-        monkeypatch.setattr("jira_cli.cli.cmd_issue_update_description", mock_cmd)
-        from jira_cli.cli import main
-        main()
-        mock_cmd.assert_called_once()
-
-    def test_main_issue_update_description_no_body(self, monkeypatch, capsys):
-        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "update-description"])
-        from jira_cli.cli import main
-        with pytest.raises(SystemExit):
-            main()
-        captured = capsys.readouterr()
-        assert "required" in captured.err
-
     def test_main_issue_transition(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "transition", "41"])
         mock_cmd = MagicMock()
         monkeypatch.setattr("jira_cli.cli.cmd_issue_update_status", mock_cmd)
-        from jira_cli.cli import main
-        main()
-        mock_cmd.assert_called_once()
-
-    def test_main_issue_assign(self, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "assign", "jane.doe"])
-        mock_cmd = MagicMock()
-        monkeypatch.setattr("jira_cli.cli.cmd_issue_assign", mock_cmd)
         from jira_cli.cli import main
         main()
         mock_cmd.assert_called_once()
@@ -766,6 +832,53 @@ class TestCLIDispatch:
         from jira_cli.cli import main
         main()
         mock_cmd.assert_called_once()
+
+    def test_main_create(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "create", "--project", "PROJ", "--summary", "New issue"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_create_issue", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+
+    def test_main_create_missing_args(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "create", "--summary", "No project"])
+        from jira_cli.cli import main
+        with pytest.raises(SystemExit):
+            main()
+        captured = capsys.readouterr()
+        assert "Usage" in captured.err
+
+    def test_main_link(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "link", "PROJ-123", "PROJ-456"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_link_issues", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+
+    def test_main_link_missing_second_key(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "link", "PROJ-123"])
+        from jira_cli.cli import main
+        with pytest.raises(SystemExit):
+            main()
+        captured = capsys.readouterr()
+        assert "Usage" in captured.err
+
+    def test_main_issue_update(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "update", "--summary", "New title"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue_update", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+
+    def test_main_issue_update_help(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "update", "-h"])
+        from jira_cli.cli import main
+        main()
+        captured = capsys.readouterr()
+        assert "issue" in captured.out.lower()
 
     def test_main_unknown_command(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["jira-cli", "blargh"])
@@ -920,14 +1033,6 @@ class TestCLIDispatchEdgeCases:
 
     def test_main_issue_transition_no_id(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "transition"])
-        from jira_cli.cli import main
-        with pytest.raises(SystemExit):
-            main()
-        captured = capsys.readouterr()
-        assert "Usage" in captured.err
-
-    def test_main_issue_assign_no_user(self, monkeypatch, capsys):
-        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "assign"])
         from jira_cli.cli import main
         with pytest.raises(SystemExit):
             main()
@@ -1111,6 +1216,20 @@ class TestHTTPCoverage:
         hdr = auth_header({"user": "admin", "pass": "p@ss"})
         assert hdr["Authorization"].startswith("Basic ")
 
+    def test_request_empty_response_body(self):
+        from jira_cli.http import _request
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b""
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.__exit__.return_value = False
+
+        with patch("jira_cli.http.urllib.request.urlopen", return_value=mock_resp) as mock_open:
+            result = _request(cfg, "POST", "issueLink", data={"type": {"name": "Relates"}})
+        assert result == {}
+        mock_open.assert_called_once()
+
 
 # -------------------------------------------------------------------
 # Format edge cases
@@ -1174,6 +1293,14 @@ class TestCompletion:
         assert "jira-cli" in captured.out
         assert "_init_completion" in captured.out
 
+    def test_bash_completion_has_new_commands(self, capsys):
+        from jira_cli.completion import cmd_completion
+        cmd_completion("bash")
+        captured = capsys.readouterr()
+        assert "create" in captured.out
+        assert "link" in captured.out
+        assert "update" in captured.out
+
     def test_zsh_completion(self, capsys):
         from jira_cli.completion import cmd_completion
         cmd_completion("zsh")
@@ -1200,16 +1327,19 @@ class TestCompletion:
 class TestHelpTexts:
     def test_help_texts_exist(self):
         from jira_cli.help_texts import HELP
-        for t in ["main", "search", "issue", "projects", "setup"]:
+        for t in ["main", "search", "issue", "projects", "setup", "create", "link"]:
             assert len(HELP.get(t, "")) > 50
 
     def test_help_contains_new_commands(self):
         from jira_cli.help_texts import HELP
         main = HELP["main"]
-        assert "update-description" in main
+        assert "update-description" not in main
         assert "transition" in main
-        assert "assign" in main
         assert "edit-comment" in main
+        assert "create" in main
+        assert "link" in main
+        assert "issue <KEY> update" in main
+        assert "issue <KEY> assign" not in main
 
     def test_print_help(self, capsys):
         from jira_cli.help_texts import print_help

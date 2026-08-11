@@ -28,7 +28,10 @@ def _request(cfg, method, path, data=None, params=None):
 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
+            raw = resp.read()
+            if not raw:
+                return {}
+            return json.loads(raw)
     except urllib.error.HTTPError as e:
         body = e.read().decode()
         try:
