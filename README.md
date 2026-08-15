@@ -32,7 +32,7 @@ jira-cli <command> [args...] [-h] [flags]
 | `search`    | Search issues with JQL or saved filters     |
 | `create`    | Create a new issue                          |
 | `link`      | Link two issues                             |
-| `issue`     | Issue detail, comments, add-comment, update |
+| `issue`     | Issue detail, comments, add-comment, attachments (list/download/delete), attach, update |
 | `setup`     | Configure Jira credentials                  |
 | `help`      | Print help text (AI-agent friendly)         |
 | `completion`| Print shell completion script               |
@@ -49,6 +49,11 @@ jira-cli issue PROJ-123
 jira-cli issue PROJ-123 comments --limit 10 --desc
 jira-cli issue PROJ-123 comment 54321
 jira-cli issue PROJ-123 add-comment --body "Working on this"
+jira-cli issue PROJ-123 attach ./screenshot.png ./error.log
+jira-cli issue PROJ-123 attachments
+jira-cli issue PROJ-123 download --all --dir ./attachments
+jira-cli issue PROJ-123 download 10001
+jira-cli issue PROJ-123 delete-attachment 10001
 jira-cli issue PROJ-123 update --summary "New title" --priority High
 jira-cli issue PROJ-123 update --description "New description" --assignee jane.doe
 jira-cli create --project BANKING --summary "Fix bug" --type Bug --priority High

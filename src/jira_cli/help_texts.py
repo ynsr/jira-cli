@@ -15,6 +15,10 @@ COMMANDS:
   issue <KEY> comments        Paginated comment list (truncated text)
   issue <KEY> comment <ID>    Full single comment detail
   issue <KEY> add-comment     Add a comment
+  issue <KEY> attachments     List attachment file(s)
+  issue <KEY> download        Download attachment file(s) (ids or --all)
+  issue <KEY> delete-attachment  Delete attachment file(s) (ids or --all)
+  issue <KEY> attach <file>   Upload attachment file(s)
   issue <KEY> update          Update summary/description/priority/assignee
   issue <KEY> transition <ID>     Transition issue to a new status
   issue <KEY> edit-comment <ID>   Edit an existing comment body
@@ -31,6 +35,7 @@ EXAMPLES:
   jira-cli issue PROJ-123 comments --limit 5 --desc
   jira-cli issue PROJ-123 comment 12345
   jira-cli issue PROJ-123 add-comment --body "Looking into this"
+  jira-cli issue PROJ-123 attach ./screenshot.png ./error.log
   jira-cli create --project BANKING --summary "Fix bug" --type Bug --priority High
   jira-cli link BANKING-123 BANKING-456 --type Relates --comment "Blocks"
   jira-cli issue PROJ-123 update --summary "New title" --priority High --assignee jane.doe
@@ -79,6 +84,10 @@ Usage:
   jira-cli issue <KEY> comments [flags]        List paginated comments (truncated)
   jira-cli issue <KEY> comment <ID>            Show full single comment
   jira-cli issue <KEY> add-comment [--body <text>]  Add a comment
+  jira-cli issue <KEY> attachments [--format json]  List attachment file(s)
+  jira-cli issue <KEY> download [<id>...] [--dir <dir>] [--all]  Download attachment file(s)
+  jira-cli issue <KEY> delete-attachment <id>... [--all]  Delete attachment file(s)
+  jira-cli issue <KEY> attach <file> [<file>...]    Upload attachment file(s)
   jira-cli issue <KEY> update [flags]               Update fields (summary/description/priority/assignee)
   jira-cli issue <KEY> -h                      This help text
 

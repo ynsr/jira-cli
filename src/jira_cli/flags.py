@@ -24,6 +24,8 @@ def parse_flags(args, known=()):
     assignee = None
     link_type = None
     comment = None
+    dir_ = None
+    all_ = False
     rest = []
     i = 0
     while i < len(args):
@@ -76,6 +78,12 @@ def parse_flags(args, known=()):
         elif a == "--comment" and i + 1 < len(args):
             comment = args[i + 1]
             i += 2
+        elif a == "--dir" and i + 1 < len(args):
+            dir_ = args[i + 1]
+            i += 2
+        elif a == "--all":
+            all_ = True
+            i += 1
         else:
             rest.append(a)
             i += 1
@@ -84,7 +92,7 @@ def parse_flags(args, known=()):
         "body": body, "list_filters": list_filters, "project": project,
         "summary": summary, "description": description, "type": issue_type,
         "priority": priority, "assignee": assignee, "link_type": link_type,
-        "comment": comment,
+        "comment": comment, "dir": dir_, "all": all_,
     }
 
 

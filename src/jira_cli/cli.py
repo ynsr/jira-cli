@@ -19,6 +19,10 @@ from jira_cli.commands import (
     cmd_create_issue,
     cmd_link_issues,
     cmd_issue_update,
+    cmd_issue_attach,
+    cmd_issue_attachments,
+    cmd_issue_download_attachment,
+    cmd_issue_delete_attachment,
 )
 from jira_cli.completion import cmd_completion
 
@@ -30,7 +34,16 @@ def print_usage_err():
 
 
 def main():
-    """Main entry point — dispatches to sub-commands."""
+    """Main entry point — dispatches to sub-commands and exits 0 on success.
+
+    Command handlers may return values (used by tests); they must never
+    leak into the setuptools sys.exit(main()) wrapper.
+    """
+    _dispatch()
+
+
+def _dispatch():
+    """Dispatch argv to sub-commands; returns None after each command."""
     cfg = load_config()
 
     # Config check — skip for setup and help
@@ -223,6 +236,50 @@ def main():
             rest, flags = parse_flags(sub_args[1:])
             return cmd_issue_update_comment(cfg, issue_key, cmt_id, flags.get("body", ""))
 
+        # issue <key> attachments [--format json]
+        if sub == "attachments":
+            if has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> attachments [--format json]", file=sys.stderr)
+                sys.exit(0)
+            rest, flags = parse_flags(sub_args)
+            return cmd_issue_attachments(cfg, issue_key, flags["format"])
+
+        # issue <key> download [<id>...] [--dir <dir>] [--all]
+        if sub == "download":
+            if has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> download [<attachment-id>...] [--dir <dir>] [--all]", file=sys.stderr)
+                sys.exit(0)
+            rest, flags = parse_flags(sub_args)
+            return cmd_issue_download_attachment(
+                cfg, issue_key,
+                attachment_ids=rest,
+                dest_dir=flags.get("dir") or ".",
+                all_attachments=flags.get("all", False),
+            )
+
+        # issue <key> delete-attachment <id>... | --all
+        if sub == "delete-attachment":
+            if has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> delete-attachment <attachment-id>... [--all]", file=sys.stderr)
+                sys.exit(0)
+            rest, flags = parse_flags(sub_args)
+            if not rest and not flags.get("all"):
+                print("Usage: jira-cli issue <issue-key> delete-attachment <attachment-id>... [--all]", file=sys.stderr)
+                sys.exit(1)
+            return cmd_issue_delete_attachment(
+                cfg, issue_key,
+                attachment_ids=rest,
+                all_attachments=flags.get("all", False),
+            )
+
+        # issue <key> attach <file> [<file>...]
+        if sub == "attach":
+            if not sub_args or has_help_flag(sub_args):
+                print("Usage: jira-cli issue <issue-key> attach <file> [<file>...]", file=sys.stderr)
+                sys.exit(1) if not sub_args else print_help("issue")
+                return
+            return cmd_issue_attach(cfg, issue_key, sub_args)
+
         # issue <key> update
         if sub == "update":
             if has_help_flag(sub_args):
@@ -238,7 +295,7 @@ def main():
             )
 
         print(f"Unknown issue subcommand: {sub}", file=sys.stderr)
-        print("Subcommands: comments, comment <id>, add-comment, update, transition, edit-comment", file=sys.stderr)
+        print("Subcommands: comments, comment <id>, add-comment, attachments, download, delete-attachment, attach, update, transition, edit-comment", file=sys.stderr)
         sys.exit(1)
 
     # --- unknown ---

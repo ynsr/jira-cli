@@ -14,7 +14,7 @@ _COMPLETION_COMMANDS = [
 ]
 
 _COMPLETION_SUBCOMMANDS = {
-    "issue": ["comments", "comment", "add-comment", "update", "transition", "edit-comment"],
+    "issue": ["comments", "comment", "add-comment", "attachments", "download", "delete-attachment", "attach", "update", "transition", "edit-comment"],
     "completion": ["bash", "zsh", "fish"],
 }
 
@@ -72,10 +72,24 @@ _jira_cli()
                     COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
                 fi
             elif [[ $cword -eq 3 ]]; then
-                local subs="comments comment add-comment update transition edit-comment"
+                local subs="comments comment add-comment attachments download delete-attachment attach update transition edit-comment"
                 COMPREPLY=($(compgen -W "$subs" -- "$cur"))
             elif [[ $cword -ge 4 ]]; then
                 case "${{words[3]}}" in
+                    download)
+                        COMPREPLY=($(compgen -W "--dir --all --help -h" -- "$cur"))
+                        ;;
+                    delete-attachment)
+                        COMPREPLY=($(compgen -W "--all --help -h" -- "$cur"))
+                        ;;
+                    attach)
+                        if [[ "$cur" != -* ]]; then
+                            # complete local file paths
+                            COMPREPLY=($(compgen -f -- "$cur"))
+                        else
+                            COMPREPLY=($(compgen -W "--help -h" -- "$cur"))
+                        fi
+                        ;;
                     comments)
                         COMPREPLY=($(compgen -W "--limit --page --desc --format --help -h" -- "$cur"))
                         ;;
@@ -136,6 +150,10 @@ _jira_cli_issue_sub() {
         'comments:List paginated comments'
         'comment:Show full comment detail'
         'add-comment:Add a comment to an issue'
+        'attachments:List attachment file(s)'
+        'download:Download attachment file(s)'
+        'delete-attachment:Delete attachment file(s)'
+        'attach:Upload attachment file(s)'
         'update:Update summary/description/priority/assignee'
     )
     _describe -t subcommands 'subcommand' subs
@@ -214,6 +232,29 @@ add-comment)
                     _arguments \\
                         '(-h --help)'{-h,--help}'[Show help]' \\
                         '--body=[Comment body text]:text'
+                ;;
+            attach)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '*:file:_files'
+                ;;
+            attachments)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '--format=[Output format]:format:(table json)'
+                ;;
+            download)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '--dir=[Destination directory]:dir:_directories' \\
+                        '--all[Download every attachment]' \\
+                        '*:attachment id'
+                ;;
+            delete-attachment)
+                    _arguments \\
+                        '(-h --help)'{-h,--help}'[Show help]' \\
+                        '--all[Delete every attachment]' \\
+                        '*:attachment id'
                 ;;
             update)
                 _arguments \\
@@ -302,6 +343,10 @@ complete -c jira-cli -f -n '__fish_jira_cli_using_command link' -l comment -d 'L
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a comments -d 'List paginated comments'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'comment' -d 'Show full comment detail'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'add-comment' -d 'Add a comment'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'attachments' -d 'List attachment file(s)'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'download' -d 'Download attachment file(s)'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'delete-attachment' -d 'Delete attachment file(s)'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'attach' -d 'Upload attachment file(s)'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'update' -d 'Update summary/description/priority/assignee'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -s h -l help -d 'Show help'
 
@@ -319,6 +364,22 @@ complete -c jira-cli -f -n '__fish_jira_cli_using_command comment' -l format -d 
 # issue add-comment flags
 complete -c jira-cli -f -n '__fish_jira_cli_using_command add-comment' -s h -l help -d 'Show help'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command add-comment' -l body -d 'Comment body text'
+
+# issue attach files
+complete -c jira-cli -f -n '__fish_jira_cli_using_command attach' -a '(__fish_complete_path)'
+
+# issue attachments flags
+complete -c jira-cli -f -n '__fish_jira_cli_using_command attachments' -s h -l help -d 'Show help'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command attachments' -l format -d 'Output format' -xa 'table json'
+
+# issue download flags
+complete -c jira-cli -f -n '__fish_jira_cli_using_command download' -s h -l help -d 'Show help'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command download' -l dir -d 'Destination directory' -a '(__fish_complete_directories)'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command download' -l all -d 'Download every attachment'
+
+# issue delete-attachment flags
+complete -c jira-cli -f -n '__fish_jira_cli_using_command delete-attachment' -s h -l help -d 'Show help'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command delete-attachment' -l all -d 'Delete every attachment'
 
 # issue update flags
 complete -c jira-cli -f -n '__fish_jira_cli_using_command update' -s h -l help -d 'Show help'

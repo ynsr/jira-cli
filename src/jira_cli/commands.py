@@ -1,10 +1,14 @@
 """All command implementations for jira-cli."""
 
 import json
+import os
 import sys
 
 from jira_cli.config import load_config, save_config
-from jira_cli.http import jira_get, jira_post, jira_put
+from jira_cli.http import (
+    jira_get, jira_post, jira_put, jira_post_attachment,
+    jira_get_binary, jira_delete_attachment,
+)
 from jira_cli.format import fmt_date, status_badge, priority_label, extract_adf_text, truncate
 from jira_cli.help_texts import print_help
 
@@ -303,6 +307,113 @@ def cmd_issue_update(cfg, issue_key, summary=None, description=None,
     changed = ", ".join(fields.keys())
     print(f"\n\033[1mUpdated {issue_key}: {changed}\033[0m")
     return result
+
+# -------------------------------------------------------------------
+# Command: issue attach
+# -------------------------------------------------------------------
+
+def cmd_issue_attach(cfg, issue_key, files):
+    """Upload one or more files as attachments to an issue."""
+    missing = [f for f in files if not os.path.isfile(f)]
+    if missing:
+        print(f"Error: file not found: {missing[0]}", file=sys.stderr)
+        sys.exit(1)
+
+    attachments = jira_post_attachment(cfg, issue_key, files)
+    if not isinstance(attachments, list):
+        attachments = []
+
+    print(f"\n\033[1mAttached to {issue_key}:\033[0m")
+    for att in attachments:
+        print(f"  \033[1m{att.get('filename', '?')}\033[0m  id={att.get('id', '?')}  {att.get('size', 0)} bytes")
+    print()
+    return attachments
+
+# -------------------------------------------------------------------
+# Command: issue attachments (list)
+# -------------------------------------------------------------------
+
+def _get_attachments_meta(cfg, issue_key):
+    """Return the list of attachment objects for an issue."""
+    data = jira_get(cfg, f"issue/{issue_key}", {"fields": "attachment"})
+    return (data.get("fields") or {}).get("attachment") or []
+
+
+def cmd_issue_attachments(cfg, issue_key, fmt="table"):
+    """List attachments of an issue."""
+    attachments = _get_attachments_meta(cfg, issue_key)
+    if not attachments:
+        print("No attachments.")
+        return []
+
+    if fmt == "json":
+        print(json.dumps(attachments, indent=2))
+        return attachments
+
+    print(f"\n\033[1mAttachments for {issue_key}\033[0m ({len(attachments)})")
+    print()
+    for a in attachments:
+        author = (a.get("author") or {}).get("displayName", "")
+        created_c = fmt_date(a.get("created", ""))
+        size = a.get("size", 0)
+        print(f"  \033[1m{a.get('id', '?')}\033[0m  {a.get('filename', '?')}  \033[38;5;244m{size} bytes  {author} \u2014 {created_c}\033[0m")
+    print()
+    return attachments
+
+
+# -------------------------------------------------------------------
+# Command: issue download attachments
+# -------------------------------------------------------------------
+
+def cmd_issue_download_attachment(cfg, issue_key, attachment_ids=None,
+                                  dest_dir=".", all_attachments=False):
+    """Download attachment(s) of an issue to dest_dir. Returns saved paths."""
+    if all_attachments or not attachment_ids:
+        metas = _get_attachments_meta(cfg, issue_key)
+        if not metas:
+            print("No attachments to download.")
+            return []
+    else:
+        metas = [jira_get(cfg, f"attachment/{aid}") for aid in attachment_ids]
+
+    os.makedirs(dest_dir, exist_ok=True)
+    saved = []
+    for meta in metas:
+        filename = os.path.basename(meta.get("filename", "attachment"))
+        content_url = meta.get("content")
+        if not content_url:
+            print(f"Error: no download URL for {filename}", file=sys.stderr)
+            sys.exit(1)
+        content = jira_get_binary(cfg, content_url)
+        path = os.path.join(dest_dir, filename)
+        with open(path, "wb") as f:
+            f.write(content)
+        saved.append(path)
+        print(f"Downloaded {filename} ({len(content)} bytes) \u2192 {path}")
+    return saved
+
+
+# -------------------------------------------------------------------
+# Command: issue delete attachments
+# -------------------------------------------------------------------
+
+def cmd_issue_delete_attachment(cfg, issue_key, attachment_ids=None, all_attachments=False):
+    """Delete attachment(s) of an issue. Returns list of deleted ids."""
+    if all_attachments:
+        ids = [a.get("id") for a in _get_attachments_meta(cfg, issue_key)]
+    else:
+        ids = list(attachment_ids or [])
+
+    if not ids:
+        print("No attachments to delete.")
+        return []
+
+    deleted = []
+    for aid in ids:
+        jira_delete_attachment(cfg, aid)
+        deleted.append(aid)
+        print(f"Deleted attachment {aid} from {issue_key}")
+    return deleted
 
 # -------------------------------------------------------------------
 # Command: setup

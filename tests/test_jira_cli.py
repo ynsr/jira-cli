@@ -3,7 +3,7 @@
 import json
 import os
 import sys
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -261,6 +261,89 @@ class TestHttpHelpers:
         from jira_cli.http import jira_post
         assert callable(jira_post)
 
+    def test_jira_post_attachment_multipart(self, tmp_path, monkeypatch):
+        from jira_cli.http import jira_post_attachment
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'[{"id": "10001", "filename": "a.txt", "size": 2}]'
+
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        mock_urlopen = MagicMock(return_value=FakeResp())
+        monkeypatch.setattr("jira_cli.http.urllib.request.urlopen", mock_urlopen)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        result = jira_post_attachment(cfg, "PROJ-123", [str(f)])
+
+        assert result[0]["filename"] == "a.txt"
+        req = mock_urlopen.call_args[0][0]
+        assert req.full_url == "https://jira.x/rest/api/2/issue/PROJ-123/attachments"
+        assert req.get_method() == "POST"
+        assert req.headers["X-atlassian-token"] == "no-check"
+        assert req.get_header("Content-type").startswith("multipart/form-data; boundary=")
+        body = req.data.decode()
+        assert 'name="file"; filename="a.txt"' in body
+        assert "Content-Type: text/plain" in body
+        assert "hi" in body
+
+    def test_jira_get_binary_returns_bytes(self, monkeypatch):
+        from jira_cli.http import jira_get_binary
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"\x89PNG fake"
+
+        mock_urlopen = MagicMock(return_value=FakeResp())
+        monkeypatch.setattr("jira_cli.http.urllib.request.urlopen", mock_urlopen)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        data = jira_get_binary(cfg, "https://jira.x/secure/attachment/1/a.txt")
+        assert data == b"\x89PNG fake"
+        req = mock_urlopen.call_args[0][0]
+        assert req.full_url == "https://jira.x/secure/attachment/1/a.txt"
+        assert req.get_header("Accept") == "application/octet-stream"
+
+        # REST-relative path form
+        jira_get_binary(cfg, "attachment/2/content")
+        req2 = mock_urlopen.call_args[0][0]
+        assert req2.full_url == "https://jira.x/rest/api/2/attachment/2/content"
+
+    def test_jira_delete_attachment_headers(self, monkeypatch):
+        from jira_cli.http import jira_delete_attachment
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b""
+
+        mock_urlopen = MagicMock(return_value=FakeResp())
+        monkeypatch.setattr("jira_cli.http.urllib.request.urlopen", mock_urlopen)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        assert jira_delete_attachment(cfg, "42") == {}
+        req = mock_urlopen.call_args[0][0]
+        assert req.get_method() == "DELETE"
+        assert req.full_url == "https://jira.x/rest/api/2/attachment/42"
+        assert req.headers["X-atlassian-token"] == "no-check"
+
 
 # -------------------------------------------------------------------
 # Format / ADF helpers
@@ -516,6 +599,234 @@ class TestCommandsUpdateIssue:
         assert "nothing to update" in captured.err
 
 
+class TestCommandsAttach:
+    """Upload attachment files to an issue."""
+
+    def test_attach_single(self, monkeypatch, tmp_path, capsys):
+        from jira_cli.commands import cmd_issue_attach
+
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        mock_attach = MagicMock(return_value=[{"id": "10001", "filename": "a.txt", "size": 2}])
+        monkeypatch.setattr("jira_cli.commands.jira_post_attachment", mock_attach)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        result = cmd_issue_attach(cfg, "PROJ-123", [str(f)])
+
+        mock_attach.assert_called_once_with(cfg, "PROJ-123", [str(f)])
+        captured = capsys.readouterr()
+        assert "a.txt" in captured.out and "10001" in captured.out
+        assert result[0]["filename"] == "a.txt"
+
+    def test_attach_multiple_files(self, monkeypatch, tmp_path):
+        from jira_cli.commands import cmd_issue_attach
+
+        f1 = tmp_path / "a.txt"
+        f1.write_text("hi")
+        f2 = tmp_path / "b.png"
+        f2.write_text("x")
+        mock_attach = MagicMock(return_value=[])
+        monkeypatch.setattr("jira_cli.commands.jira_post_attachment", mock_attach)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_attach(cfg, "PROJ-123", [str(f1), str(f2)])
+
+        mock_attach.assert_called_once_with(cfg, "PROJ-123", [str(f1), str(f2)])
+
+    def test_attach_empty_response(self, monkeypatch, tmp_path, capsys):
+        from jira_cli.commands import cmd_issue_attach
+
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        monkeypatch.setattr("jira_cli.commands.jira_post_attachment", MagicMock(return_value={}))
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        result = cmd_issue_attach(cfg, "PROJ-123", [str(f)])
+
+        assert result == []
+        captured = capsys.readouterr()
+        assert "Attached to PROJ-123" in captured.out
+
+    def test_attach_missing_file_exits(self, monkeypatch, tmp_path, capsys):
+        from jira_cli.commands import cmd_issue_attach
+
+        mock_attach = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_post_attachment", mock_attach)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit):
+            cmd_issue_attach(cfg, "PROJ-123", [str(tmp_path / "nope.txt")])
+
+        mock_attach.assert_not_called()
+        captured = capsys.readouterr()
+        assert "file not found" in captured.err
+
+
+class TestCommandsAttachments:
+    """List attachments of an issue."""
+
+    def test_list_table(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_attachments
+
+        mock_get = MagicMock(return_value={"fields": {"attachment": [
+            {"id": "1", "filename": "a.txt", "size": 10,
+             "author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000"},
+            {"id": "2", "filename": "b.png", "size": 20,
+             "author": {"displayName": "Bob"}, "created": "2024-01-02T00:00:00.000+0000"},
+        ]}})
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        result = cmd_issue_attachments(cfg, "PROJ-123")
+
+        assert len(result) == 2
+        mock_get.assert_called_once_with(cfg, "issue/PROJ-123", {"fields": "attachment"})
+        captured = capsys.readouterr()
+        assert "Attachments for PROJ-123" in captured.out
+        assert "a.txt" in captured.out and "b.png" in captured.out
+
+    def test_list_json(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_attachments
+
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(
+            return_value={"fields": {"attachment": [{"id": "1", "filename": "a.txt"}]}}))
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_attachments(cfg, "PROJ-123", fmt="json")
+        captured = capsys.readouterr()
+        assert '"filename": "a.txt"' in captured.out
+
+    def test_list_empty(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_attachments
+
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(
+            return_value={"fields": {}}))
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        assert cmd_issue_attachments(cfg, "PROJ-123") == []
+        captured = capsys.readouterr()
+        assert "No attachments." in captured.out
+
+
+class TestCommandsDownload:
+    """Download attachments of an issue."""
+
+    def test_download_by_id(self, monkeypatch, tmp_path, capsys):
+        from jira_cli.commands import cmd_issue_download_attachment
+
+        mock_get = MagicMock(return_value={
+            "filename": "report.pdf",
+            "content": "https://jira.x/secure/attachment/21523/report.pdf",
+        })
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+        mock_bin = MagicMock(return_value=b"%PDF-1.4 fake")
+        monkeypatch.setattr("jira_cli.commands.jira_get_binary", mock_bin)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        saved = cmd_issue_download_attachment(cfg, "PROJ-123",
+                                              attachment_ids=["21523"], dest_dir=str(tmp_path))
+
+        assert saved == [str(tmp_path / "report.pdf")]
+        assert (tmp_path / "report.pdf").read_bytes() == b"%PDF-1.4 fake"
+        mock_get.assert_called_once_with(cfg, "attachment/21523")
+        mock_bin.assert_called_once_with(cfg, "https://jira.x/secure/attachment/21523/report.pdf")
+        captured = capsys.readouterr()
+        assert "report.pdf" in captured.out
+
+    def test_download_missing_content_url_exits(self, monkeypatch, tmp_path, capsys):
+        from jira_cli.commands import cmd_issue_download_attachment
+
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(return_value={"filename": "a.txt"}))
+        mock_bin = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_get_binary", mock_bin)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit):
+            cmd_issue_download_attachment(cfg, "PROJ-123",
+                                          attachment_ids=["1"], dest_dir=str(tmp_path))
+        mock_bin.assert_not_called()
+        captured = capsys.readouterr()
+        assert "no download URL" in captured.err
+
+    def test_download_all_when_no_ids(self, monkeypatch, tmp_path):
+        from jira_cli.commands import cmd_issue_download_attachment
+
+        mock_get = MagicMock(return_value={"fields": {"attachment": [
+            {"id": "1", "filename": "a.txt", "content": "https://jira.x/secure/attachment/1/a.txt"},
+            {"id": "2", "filename": "b.txt", "content": "https://jira.x/secure/attachment/2/b.txt"},
+        ]}})
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+        monkeypatch.setattr("jira_cli.commands.jira_get_binary", MagicMock(return_value=b"x"))
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        saved = cmd_issue_download_attachment(cfg, "PROJ-123", dest_dir=str(tmp_path))
+
+        assert len(saved) == 2
+        assert (tmp_path / "a.txt").exists() and (tmp_path / "b.txt").exists()
+        mock_get.assert_called_once_with(cfg, "issue/PROJ-123", {"fields": "attachment"})
+
+    def test_download_none_exist(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_download_attachment
+
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(return_value={"fields": {}}))
+        monkeypatch.setattr("jira_cli.commands.jira_get_binary", MagicMock())
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        assert cmd_issue_download_attachment(cfg, "PROJ-123", dest_dir=".") == []
+        captured = capsys.readouterr()
+        assert "No attachments to download." in captured.out
+
+
+class TestCommandsDeleteAttachment:
+    """Delete attachments of an issue."""
+
+    def test_delete_by_ids(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_delete_attachment
+
+        mock_del = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_delete_attachment", mock_del)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        deleted = cmd_issue_delete_attachment(cfg, "PROJ-123", attachment_ids=["1", "2"])
+
+        assert deleted == ["1", "2"]
+        assert mock_del.call_args_list == [call(cfg, "1"), call(cfg, "2")]
+        captured = capsys.readouterr()
+        assert "Deleted attachment 1 from PROJ-123" in captured.out
+
+    def test_delete_all(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_delete_attachment
+
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(
+            return_value={"fields": {"attachment": [
+                {"id": "1", "filename": "a.txt"},
+                {"id": "2", "filename": "b.txt"},
+            ]}}))
+        mock_del = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_delete_attachment", mock_del)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        deleted = cmd_issue_delete_attachment(cfg, "PROJ-123", all_attachments=True)
+
+        assert deleted == ["1", "2"]
+        assert mock_del.call_count == 2
+        captured = capsys.readouterr()
+        assert "Deleted attachment 2 from PROJ-123" in captured.out
+
+    def test_delete_none_exits_cleanly(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_delete_attachment
+
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(return_value={"fields": {}}))
+        mock_del = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_delete_attachment", mock_del)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        assert cmd_issue_delete_attachment(cfg, "PROJ-123", all_attachments=True) == []
+        mock_del.assert_not_called()
+        captured = capsys.readouterr()
+        assert "No attachments to delete." in captured.out
+
+
 class TestCommandsLegacy:
     """Existing command behaviors (mocked HTTP)."""
 
@@ -737,6 +1048,15 @@ class TestFlags:
         assert f["link_type"] == "Blocks"
         assert f["comment"] == "Depends"
 
+    def test_parse_flags_dir_all(self):
+        from jira_cli.flags import parse_flags
+        r, f = parse_flags(["--dir", "/tmp/x", "--all"])
+        assert f["dir"] == "/tmp/x"
+        assert f["all"] is True
+        r, f = parse_flags([])
+        assert f["dir"] is None
+        assert f["all"] is False
+
 
 # -------------------------------------------------------------------
 # CLI Dispatch
@@ -832,6 +1152,42 @@ class TestCLIDispatch:
         from jira_cli.cli import main
         main()
         mock_cmd.assert_called_once()
+
+    def test_main_issue_attach(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "attach", "a.txt"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue_attach", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+
+    def test_main_issue_attachments(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "attachments"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue_attachments", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+        assert mock_cmd.call_args[0][2] == "table"
+
+    def test_main_issue_download(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "download", "21523", "--dir", "/tmp"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue_download_attachment", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+        assert mock_cmd.call_args[1]["attachment_ids"] == ["21523"]
+        assert mock_cmd.call_args[1]["dest_dir"] == "/tmp"
+
+    def test_main_issue_delete_attachment(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "delete-attachment", "21523"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue_delete_attachment", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+        assert mock_cmd.call_args[1]["attachment_ids"] == ["21523"]
 
     def test_main_create(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["jira-cli", "create", "--project", "PROJ", "--summary", "New issue"])
@@ -1041,6 +1397,22 @@ class TestCLIDispatchEdgeCases:
 
     def test_main_issue_edit_comment_no_id(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "edit-comment"])
+        from jira_cli.cli import main
+        with pytest.raises(SystemExit):
+            main()
+        captured = capsys.readouterr()
+        assert "Usage" in captured.err
+
+    def test_main_issue_attach_no_files(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "attach"])
+        from jira_cli.cli import main
+        with pytest.raises(SystemExit):
+            main()
+        captured = capsys.readouterr()
+        assert "Usage" in captured.err
+
+    def test_main_issue_delete_attachment_no_ids(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "delete-attachment"])
         from jira_cli.cli import main
         with pytest.raises(SystemExit):
             main()
