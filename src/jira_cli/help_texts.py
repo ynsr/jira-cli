@@ -102,7 +102,7 @@ Flags for 'add-comment' subcommand:
 
 Flags for 'update' subcommand:
   --summary <text>    New summary/title
-  --description <text>  New description (plain text)
+  --description <text>  New description (wiki markup on Jira Server/DC; plain text on Cloud)
   --priority <name>   New priority (e.g. High, Medium, Low)
   --assignee <user>   New assignee (by username; empty string to unassign)
 
@@ -137,7 +137,7 @@ Required:
 
 Optional:
   --type <name>           Issue type (default: Task; e.g. Bug, Story, Epic)
-  --description "<text>"  Issue description (plain text)
+  --description "<text>"  Issue description (wiki markup on Jira Server/DC; plain text on Cloud)
   --priority <name>       Priority (e.g. Highest, High, Medium, Low, Lowest)
   --assignee <user>       Assignee username (empty string to leave unassigned)
   --format <fmt>          Output: table (default) or json
@@ -171,6 +171,11 @@ Usage:
 Prompts for Jira URL, username, and password.
 Saves to ~/.jira-cli.json (chmod 600).
 Can be overridden by env vars: JIRA_URL, JIRA_USER, JIRA_PASS.
+
+COMPATIBILITY:
+  Works with both Jira Server/Data Center (REST API v2) and Jira Cloud
+  (REST API v3). The API version is auto-detected; force it with
+  JIRA_API_VERSION=2|3 if needed.
 
 EXAMPLE:
   jira-cli setup

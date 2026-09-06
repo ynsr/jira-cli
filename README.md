@@ -68,6 +68,20 @@ jira-cli completion fish
 Set `JIRA_URL`, `JIRA_USER`, `JIRA_PASS` env vars, or run `jira-cli setup`
 to save credentials to `~/.jira-cli.json` (chmod 600).
 
+### Jira Server/DC & Cloud compatibility
+
+jira-cli works with both **Jira Server/Data Center** (REST API v2) and
+**Jira Cloud** (REST API v3):
+
+- Reads and JQL searches always use API v2 (served by both platforms).
+- Write operations (create, update, comments, links) use the version
+  auto-detected from `/rest/api/2/serverInfo` (`deploymentType`).
+- On Server/DC the `description` and comment bodies are sent as plain
+  wiki-markup strings; on Cloud they are sent as Atlassian Document Format
+  (ADF) documents — handled automatically.
+- Force a version if needed: `JIRA_API_VERSION=2` or `JIRA_API_VERSION=3`
+  (default `auto`).
+
 ## Development
 
 ```bash

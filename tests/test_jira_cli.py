@@ -511,7 +511,7 @@ class TestCommandsCreateIssue:
         assert fields["issuetype"] == {"name": "Bug"}
         assert fields["priority"] == {"name": "High"}
         assert fields["assignee"] == {"name": "jane.doe"}
-        assert fields["description"]["type"] == "doc"
+        assert fields["description"] == "Some description"
 
     def test_create_json_format(self, monkeypatch, capsys):
         from jira_cli.commands import cmd_create_issue
@@ -576,7 +576,7 @@ class TestCommandsUpdateIssue:
         assert fields["summary"] == "New title"
         assert fields["priority"] == {"name": "High"}
         assert fields["assignee"] == {"name": "jane.doe"}
-        assert fields["description"]["type"] == "doc"
+        assert fields["description"] == "New desc"
 
     def test_update_single_field(self, monkeypatch):
         from jira_cli.commands import cmd_issue_update
@@ -597,6 +597,310 @@ class TestCommandsUpdateIssue:
             cmd_issue_update(cfg, "PROJ-123")
         captured = capsys.readouterr()
         assert "nothing to update" in captured.err
+
+
+class TestApiVersionCompat:
+    """v2 (Server/DC) vs v3 (Cloud) compatibility.
+
+    v2: description/comment bodies are plain wiki-markup strings.
+    v3: description/comment bodies are ADF documents.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_api_version(self):
+        from jira_cli.http import _reset_version_state
+
+        _reset_version_state()
+        yield
+        _reset_version_state()
+
+    # ---- detection ---------------------------------------------------
+
+    def test_detect_v2_when_deployment_type_is_server(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(return_value={"deploymentType": "Server"}))
+        assert http.detect_write_api_version({"url": "https://x"}) == 2
+        assert http.get_write_api_version() == 2
+        assert not http.is_api_v3({"url": "https://x"})
+
+    def test_detect_v3_when_deployment_type_is_cloud(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(return_value={"deploymentType": "Cloud"}))
+        assert http.detect_write_api_version({"url": "https://x"}) == 3
+        assert http.is_api_v3({"url": "https://x"})
+
+    def test_detect_is_cached(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(return_value={"deploymentType": "Cloud"}))
+        http.ensure_api_version_detected({"url": "https://x"})
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(side_effect=AssertionError("must not probe twice")))
+        assert http.ensure_api_version_detected({"url": "https://x"}) == 3
+
+    def test_env_override_forces_v2(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(side_effect=AssertionError("env override must not probe")))
+        assert http.detect_write_api_version({"url": "https://x"}) == 2
+
+    def test_env_override_forces_v3(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "v3")
+        assert http.detect_write_api_version({"url": "https://x"}) == 3
+
+    def test_env_override_auto_falls_back_to_detection(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "auto")
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(return_value={"deploymentType": "Server"}))
+        assert http.detect_write_api_version({"url": "https://x"}) == 2
+
+    def test_detection_failure_falls_back_to_v2(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setattr(http, "_probe_server_info", MagicMock(return_value=None))
+        assert http.detect_write_api_version({"url": "https://x"}) == 2
+
+    def test_detection_ignores_deployment_type_case(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setattr(http, "_probe_server_info",
+                            MagicMock(return_value={"deploymentType": "  ClOuD  "}))
+        assert http.detect_write_api_version({"url": "https://x"}) == 3
+
+    def test_missing_deployment_type_means_v2(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setattr(http, "_probe_server_info", MagicMock(return_value={}))
+        assert http.detect_write_api_version({"url": "https://x"}) == 2
+
+    def test_set_write_api_version_validates(self):
+        from jira_cli import http
+
+        with pytest.raises(ValueError):
+            http.set_write_api_version(4)
+
+    # ---- write routing -----------------------------------------------
+
+    def test_write_methods_route_to_v3_on_cloud(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        captured_urls = []
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(req, timeout=None):
+            captured_urls.append(req.full_url)
+            return FakeResp()
+
+        monkeypatch.setattr("jira_cli.http.urllib.request.urlopen", fake_urlopen)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        http.jira_post(cfg, "issue", {"fields": {}})
+        http.jira_put(cfg, "issue/P-1", {"fields": {}})
+        http.jira_delete(cfg, "issue/P-1")
+        http.jira_get(cfg, "issue/P-1")
+
+        assert captured_urls[0].startswith("https://jira.x/rest/api/3/issue")
+        assert captured_urls[1].startswith("https://jira.x/rest/api/3/issue/P-1")
+        assert captured_urls[2].startswith("https://jira.x/rest/api/3/issue/P-1")
+        # reads always stay on v2
+        assert captured_urls[3].startswith("https://jira.x/rest/api/2/issue/P-1")
+
+    def test_write_methods_route_to_v2_on_server(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        captured_urls = []
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        monkeypatch.setattr(
+            "jira_cli.http.urllib.request.urlopen",
+            lambda req, timeout=None: (captured_urls.append(req.full_url), FakeResp())[1],
+        )
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        http.jira_post(cfg, "issue", {"fields": {}})
+        http.jira_put(cfg, "issue/P-1", {"fields": {}})
+
+        assert captured_urls[0].startswith("https://jira.x/rest/api/2/issue")
+        assert captured_urls[1].startswith("https://jira.x/rest/api/2/issue/P-1")
+
+    # ---- body shaping -------------------------------------------------
+
+    def test_description_body_v2_is_plain_string(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        cfg = {"url": "https://x"}
+        http.ensure_api_version_detected(cfg)
+        assert http.description_body("h3. Hello") == "h3. Hello"
+        assert http.comment_body("plain comment") == "plain comment"
+
+    def test_description_body_v3_is_adf(self, monkeypatch):
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        cfg = {"url": "https://x"}
+        http.ensure_api_version_detected(cfg)
+        doc = http.description_body("Hello")
+        assert doc["type"] == "doc" and doc["version"] == 1
+        assert doc["content"][0]["content"][0]["text"] == "Hello"
+        assert http.comment_body("hello")["type"] == "doc"
+
+    # ---- commands respect the detected version ------------------------
+
+    def test_create_issue_v2_sends_plain_description(self, monkeypatch):
+        from jira_cli.commands import cmd_create_issue
+        from jira_cli import http
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        mock_post = MagicMock(return_value={"key": "PROJ-1", "id": "1"})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_create_issue(cfg, "PROJ", "Summary", description="h3. Wiki markup")
+
+        payload = mock_post.call_args[0][2]
+        assert payload["fields"]["description"] == "h3. Wiki markup"
+
+    def test_create_issue_v3_sends_adf_description(self, monkeypatch):
+        from jira_cli.commands import cmd_create_issue
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        mock_post = MagicMock(return_value={"key": "PROJ-1", "id": "1"})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_create_issue(cfg, "PROJ", "Summary", description="Hello")
+
+        payload = mock_post.call_args[0][2]
+        assert payload["fields"]["description"]["type"] == "doc"
+
+    def test_issue_update_v2_sends_plain_description(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        mock_put = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(cfg, "PROJ-123", description="New desc")
+
+        payload = mock_put.call_args[0][2]
+        assert payload["fields"]["description"] == "New desc"
+
+    def test_issue_update_v3_sends_adf_description(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        mock_put = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(cfg, "PROJ-123", description="New desc")
+
+        payload = mock_put.call_args[0][2]
+        assert payload["fields"]["description"]["type"] == "doc"
+
+    def test_add_comment_v2_sends_plain_body(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_add_comment
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        mock_post = MagicMock(return_value={"id": "9", "created": ""})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_add_comment(cfg, "TEST-1", "plain body")
+        mock_post.assert_called_once_with(cfg, "issue/TEST-1/comment", {"body": "plain body"})
+
+    def test_add_comment_v3_sends_adf_body(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_add_comment
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        mock_post = MagicMock(return_value={"id": "9", "created": ""})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_add_comment(cfg, "TEST-1", "body")
+        body = mock_post.call_args[0][2]["body"]
+        assert body["type"] == "doc"
+
+    def test_edit_comment_v2_sends_plain_body(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update_comment
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        mock_put = MagicMock(return_value={"updated": ""})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body")
+        mock_put.assert_called_once_with(
+            cfg, "issue/PROJ-123/comment/54321", {"body": "Updated body"})
+
+    def test_edit_comment_v3_sends_adf_body(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update_comment
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        mock_put = MagicMock(return_value={"updated": ""})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body")
+        body = mock_put.call_args[0][2]["body"]
+        assert body["type"] == "doc"
+
+    def test_link_v2_sends_plain_comment(self, monkeypatch):
+        from jira_cli.commands import cmd_link_issues
+
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+        mock_post = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_link_issues(cfg, "PROJ-123", "PROJ-456", link_type="Blocks", comment="Depends")
+        payload = mock_post.call_args[0][2]
+        assert payload["comment"] == {"body": "Depends"}
+
+    def test_link_v3_sends_adf_comment(self, monkeypatch):
+        from jira_cli.commands import cmd_link_issues
+
+        monkeypatch.setenv("JIRA_API_VERSION", "3")
+        mock_post = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_link_issues(cfg, "PROJ-123", "PROJ-456", comment="Depends")
+        payload = mock_post.call_args[0][2]
+        assert payload["comment"]["body"]["type"] == "doc"
 
 
 class TestCommandsAttach:

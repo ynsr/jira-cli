@@ -6,6 +6,9 @@ import sys
 
 from jira_cli.config import load_config, save_config
 from jira_cli.http import (
+    ensure_api_version_detected,
+    description_body,
+    comment_body,
     jira_get, jira_post, jira_put, jira_post_attachment,
     jira_get_binary, jira_delete_attachment,
 )
@@ -190,8 +193,9 @@ def cmd_issue_add_comment(cfg, issue_key, body_text):
             print("Error: comment body is empty.", file=sys.stderr)
             sys.exit(1)
 
-    # For self-hosted Jira, plain text body is accepted
-    data = jira_post(cfg, f"issue/{issue_key}/comment", {"body": body_text})
+    ensure_api_version_detected(cfg)
+    # v2 (Server/DC): plain text body; v3 (Cloud): ADF document
+    data = jira_post(cfg, f"issue/{issue_key}/comment", {"body": comment_body(body_text)})
     cid = data.get("id", "?")
     created_c = fmt_date(data.get("created", ""))
     print(f"\n\033[1mComment #{cid} added to {issue_key}\033[0m")
@@ -223,7 +227,8 @@ def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text):
         print("Error: comment body is empty.", file=sys.stderr)
         sys.exit(1)
 
-    data = {"body": body_text}
+    ensure_api_version_detected(cfg)
+    data = {"body": comment_body(body_text)}
     result = jira_put(cfg, f"issue/{issue_key}/comment/{comment_id}", data)
     updated_c = fmt_date(result.get("updated", ""))
     print(f"\n\033[1mComment #{comment_id} updated on {issue_key}\033[0m")
@@ -236,7 +241,7 @@ def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text):
 def cmd_create_issue(cfg, project, summary, issue_type="Task", description=None,
                      priority=None, assignee=None, fmt="table"):
     """Create a new issue. Returns the created issue dict."""
-    from jira_cli.format import _build_adf_doc
+    ensure_api_version_detected(cfg)
 
     fields = {
         "project": {"key": project},
@@ -244,7 +249,7 @@ def cmd_create_issue(cfg, project, summary, issue_type="Task", description=None,
         "issuetype": {"name": issue_type},
     }
     if description is not None:
-        fields["description"] = _build_adf_doc(description)
+        fields["description"] = description_body(description)
     if priority:
         fields["priority"] = {"name": priority}
     if assignee is not None:
@@ -267,13 +272,15 @@ def cmd_create_issue(cfg, project, summary, issue_type="Task", description=None,
 
 def cmd_link_issues(cfg, outward_key, inward_key, link_type="Relates", comment=None):
     """Create a link between two issues. Returns {} on success."""
+    ensure_api_version_detected(cfg)
+
     payload = {
         "type": {"name": link_type},
         "inwardIssue": {"key": inward_key},
         "outwardIssue": {"key": outward_key},
     }
     if comment:
-        payload["comment"] = {"body": comment}
+        payload["comment"] = {"body": comment_body(comment)}
 
     result = jira_post(cfg, "issueLink", payload)
     print(f"\n\033[1mLinked {outward_key} \u2194 {inward_key} ({link_type})\033[0m")
@@ -287,13 +294,13 @@ def cmd_link_issues(cfg, outward_key, inward_key, link_type="Relates", comment=N
 def cmd_issue_update(cfg, issue_key, summary=None, description=None,
                      priority=None, assignee=None):
     """Update editable fields of an issue (summary/description/priority/assignee)."""
-    from jira_cli.format import _build_adf_doc
+    ensure_api_version_detected(cfg)
 
     fields = {}
     if summary is not None:
         fields["summary"] = summary
     if description is not None:
-        fields["description"] = _build_adf_doc(description)
+        fields["description"] = description_body(description)
     if priority is not None:
         fields["priority"] = {"name": priority}
     if assignee is not None:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jira-cli"
-version = "2.0.0"
+version = "2.1.0"
 description = "Query, list, and interact with Jira issues from the terminal"
 readme = "README.md"
 license = {text = "MIT"}
