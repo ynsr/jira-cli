@@ -46,6 +46,7 @@ jira-cli search --list-filters
 jira-cli search --saved my-issues --limit 5 --format json
 jira-cli search --saved my-issues+blocked
 jira-cli issue PROJ-123
+jira-cli issue PROJ-123 --format json --include-raw   # JSON view (--json alias also works)
 jira-cli issue PROJ-123 comments --limit 10 --desc
 jira-cli issue PROJ-123 comment 54321
 jira-cli issue PROJ-123 add-comment --body "Working on this"

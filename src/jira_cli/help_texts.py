@@ -46,7 +46,7 @@ EXAMPLES:
 
 AI USAGE:
   issues = run("jira-cli search --saved my-issues --limit 5 --format json")
-  detail = run("jira-cli issue PROJ-123")
+  detail = run("jira-cli issue PROJ-123 --format json")  # curated JSON (--json also works)
   cmts   = run("jira-cli issue PROJ-123 comments --limit 3 --format json")
 
 Run 'jira-cli <command> -h' for per-command help with examples.
@@ -80,7 +80,7 @@ EXAMPLES:
 HELP["issue"] = """jira-cli issue — show issue detail and work with comments
 
 Usage:
-  jira-cli issue <KEY>                         Show issue detail + latest comment
+  jira-cli issue <KEY> [--format json]         Show issue detail + latest comment (or JSON view)
   jira-cli issue <KEY> comments [flags]        List paginated comments (truncated)
   jira-cli issue <KEY> comment <ID>            Show full single comment
   jira-cli issue <KEY> add-comment [--body <text>]  Add a comment
@@ -90,6 +90,11 @@ Usage:
   jira-cli issue <KEY> attach <file> [<file>...]    Upload attachment file(s)
   jira-cli issue <KEY> update [flags]               Update fields (summary/description/priority/assignee)
   jira-cli issue <KEY> -h                      This help text
+
+Flags for 'issue <KEY>' detail view:
+  --format <fmt>      table (default) or json
+  --json              Shorthand for --format json
+  --include-raw       With json output: add "raw" key holding the untouched Jira payload
 
 Flags for 'comments' subcommand:
   --limit <N>         Comments per page (default: 5)
@@ -108,6 +113,7 @@ Flags for 'update' subcommand:
 
 EXAMPLES:
   jira-cli issue PROJ-123                                        # detail + latest comment
+  jira-cli issue PROJ-123 --format json --include-raw            # JSON view + raw payload
   jira-cli issue PROJ-123 comments --limit 10 --page 2 --desc    # paginated comments
   jira-cli issue PROJ-123 comment 54321                          # full comment detail
   jira-cli issue PROJ-123 add-comment --body "Working on this"   # add comment

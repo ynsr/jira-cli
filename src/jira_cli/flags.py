@@ -3,9 +3,9 @@
 
 def parse_flags(args, known=()):
     """
-    Scan args for --limit, --page, --format, --desc, --saved, --body flags,
-    plus create/update flags (--project, --summary, --description, --type,
-    --priority, --assignee, --link-type, --comment).
+    Scan args for --limit, --page, --format, --json, --desc, --saved, --body,
+    --include-raw flags, plus create/update flags (--project, --summary,
+    --description, --type, --priority, --assignee, --link-type, --comment).
     known: additional flags to accept (e.g. ('--body',)).
     Returns (remaining_args, dict).
     """
@@ -26,6 +26,7 @@ def parse_flags(args, known=()):
     comment = None
     dir_ = None
     all_ = False
+    include_raw = False
     rest = []
     i = 0
     while i < len(args):
@@ -39,6 +40,9 @@ def parse_flags(args, known=()):
         elif a == "--format" and i + 1 < len(args):
             fmt = args[i + 1]
             i += 2
+        elif a == "--json":
+            fmt = "json"
+            i += 1
         elif a == "--desc":
             desc = True
             i += 1
@@ -84,6 +88,9 @@ def parse_flags(args, known=()):
         elif a == "--all":
             all_ = True
             i += 1
+        elif a == "--include-raw":
+            include_raw = True
+            i += 1
         else:
             rest.append(a)
             i += 1
@@ -92,7 +99,7 @@ def parse_flags(args, known=()):
         "body": body, "list_filters": list_filters, "project": project,
         "summary": summary, "description": description, "type": issue_type,
         "priority": priority, "assignee": assignee, "link_type": link_type,
-        "comment": comment, "dir": dir_, "all": all_,
+        "comment": comment, "dir": dir_, "all": all_, "include_raw": include_raw,
     }
 
 

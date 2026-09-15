@@ -49,11 +49,11 @@ def cmd_search(cfg, jql, limit=20, fmt="table"):
     issues = data.get("issues", [])
     total = data.get("total", 0)
 
-    if not issues:
-        print("No issues found.")
-        return
     if fmt == "json":
         print(json.dumps(issues, indent=2))
+        return
+    if not issues:
+        print("No issues found.")
         return
 
     print(f"\n\033[1mQuery:\033[0m {jql}")
@@ -77,10 +77,42 @@ def cmd_search(cfg, jql, limit=20, fmt="table"):
 # Command: issue (+ sub-commands)
 # -------------------------------------------------------------------
 
-def cmd_issue(cfg, issue_key):
-    """Show issue detail with the latest comment."""
+def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
+    """Show issue detail with the latest comment (table) or full JSON view."""
     data = jira_get(cfg, f"issue/{issue_key}")
     f = data.get("fields", {})
+    cmts_data = jira_get(cfg, f"issue/{issue_key}/comment", {"maxResults": 50, "startAt": 0})
+    comments = cmts_data.get("comments", [])
+
+    if fmt == "json":
+        out = {
+            "key": data.get("key", issue_key),
+            "summary": f.get("summary", ""),
+            "description": extract_adf_text(f.get("description")),
+            "status": f.get("status") or {},
+            "priority": f.get("priority") or {},
+            "issuetype": f.get("issuetype") or {},
+            "assignee": f.get("assignee") or {},
+            "reporter": f.get("reporter") or {},
+            "created": f.get("created", ""),
+            "updated": f.get("updated", ""),
+            "project": f.get("project") or {},
+            "labels": f.get("labels") or [],
+            "comments": [
+                {
+                    "id": c.get("id", ""),
+                    "author": (c.get("author") or {}).get("displayName", ""),
+                    "created": c.get("created", ""),
+                    "updated": c.get("updated", ""),
+                    "body": extract_adf_text(c.get("body")),
+                }
+                for c in comments
+            ],
+        }
+        if include_raw:
+            out["raw"] = data
+        print(json.dumps(out, indent=2))
+        return
 
     print(f"\n\033[1m{'='*60}\033[0m")
     print(f"  \033[1m{data['key']}\033[0m  {f.get('summary','')}")
@@ -115,9 +147,6 @@ def cmd_issue(cfg, issue_key):
         print(f"\n  \033[1mDescription (rendered):\033[0m")
         print(f"    {rf['description']}")
 
-    # Latest comment only (fetch via comments API, last item)
-    cmts_data = jira_get(cfg, f"issue/{issue_key}/comment", {"maxResults": 50, "startAt": 0})
-    comments = cmts_data.get("comments", [])
     if comments:
         latest = comments[-1]
         author = latest.get("author", {}).get("displayName", "")
@@ -138,11 +167,11 @@ def cmd_issue_comments(cfg, issue_key, limit=5, page=1, desc=False, fmt="table")
     comments = data.get("comments", [])
     total = data.get("total", 0)
 
-    if not comments:
-        print("No comments found.")
-        return
     if fmt == "json":
         print(json.dumps(comments, indent=2))
+        return
+    if not comments:
+        print("No comments found.")
         return
 
     # Sort: most recent last unless --desc

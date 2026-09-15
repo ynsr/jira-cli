@@ -168,29 +168,22 @@ def _dispatch():
         if has_help_flag(args):
             print_help("issue")
             return
-        if not args:
-            print("Usage: jira-cli issue <issue-key> [comments|comment|add-comment] [args...]", file=sys.stderr)
+        rest, flags = parse_flags(args)
+        if not rest:
+            print("Usage: jira-cli issue <issue-key> [subcommand] [args...]", file=sys.stderr)
+            print("Subcommands: comments, comment <id>, add-comment, attachments, download, delete-attachment, attach, update, transition, edit-comment", file=sys.stderr)
             sys.exit(1)
-        issue_key = args[0].upper()
-        sub = args[1] if len(args) > 1 else None
+        issue_key = rest[0].upper()
+        sub = rest[1] if len(rest) > 1 else None
 
-        # issue <key>
+        # issue <key> — detail view (table or json)
         if sub is None:
-            return cmd_issue(cfg, issue_key)
+            return cmd_issue(cfg, issue_key, fmt=flags["format"], include_raw=flags["include_raw"])
 
-        sub_args = args[2:]
-
-        # issue <key> -h / --help
-        if sub in ("--help", "-h"):
-            print_help("issue")
-            return
+        sub_args = rest[2:]
 
         # issue <key> comments
         if sub == "comments":
-            if has_help_flag(sub_args):
-                print_help("issue")
-                return
-            rest, flags = parse_flags(sub_args)
             return cmd_issue_comments(
                 cfg, issue_key,
                 limit=flags["limit"],
@@ -201,91 +194,62 @@ def _dispatch():
 
         # issue <key> comment <id>
         if sub == "comment":
-            if not sub_args or has_help_flag(sub_args):
+            if not sub_args:
                 print("Usage: jira-cli issue <issue-key> comment <comment-id> [--format json]", file=sys.stderr)
-                sys.exit(1) if not sub_args else print_help("issue")
-                return
-            cmt_id = sub_args[0]
-            rest, flags = parse_flags(sub_args[1:])
-            return cmd_issue_comment(cfg, issue_key, cmt_id, flags["format"])
+                sys.exit(1)
+            return cmd_issue_comment(cfg, issue_key, sub_args[0], flags["format"])
 
         # issue <key> add-comment
         if sub == "add-comment":
-            if has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> add-comment [--body <text>]", file=sys.stderr)
-                print("  Omit --body to read comment from stdin (Ctrl+D to end).", file=sys.stderr)
-                sys.exit(0)
-            rest, flags = parse_flags(sub_args)
             return cmd_issue_add_comment(cfg, issue_key, flags["body"])
 
         # issue <key> transition <id|name>
         if sub == "transition":
-            if not sub_args or has_help_flag(sub_args):
+            if not sub_args:
                 print("Usage: jira-cli issue <issue-key> transition <transition-id-or-name>", file=sys.stderr)
-                sys.exit(1) if not sub_args else print_help("issue")
-                return
+                sys.exit(1)
             return cmd_issue_update_status(cfg, issue_key, sub_args[0])
 
         # issue <key> edit-comment <id>
         if sub == "edit-comment":
-            if not sub_args or has_help_flag(sub_args):
+            if not sub_args:
                 print("Usage: jira-cli issue <issue-key> edit-comment <comment-id> --body <text>", file=sys.stderr)
-                sys.exit(1) if not sub_args else print_help("issue")
-                return
-            cmt_id = sub_args[0]
-            rest, flags = parse_flags(sub_args[1:])
-            return cmd_issue_update_comment(cfg, issue_key, cmt_id, flags.get("body", ""))
+                sys.exit(1)
+            return cmd_issue_update_comment(cfg, issue_key, sub_args[0], flags.get("body", ""))
 
         # issue <key> attachments [--format json]
         if sub == "attachments":
-            if has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> attachments [--format json]", file=sys.stderr)
-                sys.exit(0)
-            rest, flags = parse_flags(sub_args)
             return cmd_issue_attachments(cfg, issue_key, flags["format"])
 
         # issue <key> download [<id>...] [--dir <dir>] [--all]
         if sub == "download":
-            if has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> download [<attachment-id>...] [--dir <dir>] [--all]", file=sys.stderr)
-                sys.exit(0)
-            rest, flags = parse_flags(sub_args)
             return cmd_issue_download_attachment(
                 cfg, issue_key,
-                attachment_ids=rest,
+                attachment_ids=sub_args,
                 dest_dir=flags.get("dir") or ".",
                 all_attachments=flags.get("all", False),
             )
 
         # issue <key> delete-attachment <id>... | --all
         if sub == "delete-attachment":
-            if has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> delete-attachment <attachment-id>... [--all]", file=sys.stderr)
-                sys.exit(0)
-            rest, flags = parse_flags(sub_args)
-            if not rest and not flags.get("all"):
+            if not sub_args and not flags.get("all"):
                 print("Usage: jira-cli issue <issue-key> delete-attachment <attachment-id>... [--all]", file=sys.stderr)
                 sys.exit(1)
             return cmd_issue_delete_attachment(
                 cfg, issue_key,
-                attachment_ids=rest,
+                attachment_ids=sub_args,
                 all_attachments=flags.get("all", False),
             )
 
         # issue <key> attach <file> [<file>...]
         if sub == "attach":
-            if not sub_args or has_help_flag(sub_args):
+            if not sub_args:
                 print("Usage: jira-cli issue <issue-key> attach <file> [<file>...]", file=sys.stderr)
-                sys.exit(1) if not sub_args else print_help("issue")
-                return
+                sys.exit(1)
             return cmd_issue_attach(cfg, issue_key, sub_args)
 
         # issue <key> update
         if sub == "update":
-            if has_help_flag(sub_args):
-                print("Usage: jira-cli issue <issue-key> update [--summary <text>] [--description <text>] [--priority <p>] [--assignee <user>]", file=sys.stderr)
-                sys.exit(0)
-            rest, flags = parse_flags(sub_args)
             return cmd_issue_update(
                 cfg, issue_key,
                 summary=flags.get("summary"),

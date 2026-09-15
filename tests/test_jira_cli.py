@@ -1213,6 +1213,62 @@ class TestCommandsLegacy:
         captured = capsys.readouterr()
         assert "TEST-1" in captured.out
 
+    def test_cmd_issue_json(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue
+
+        mock_get = MagicMock(
+            side_effect=[
+                {
+                    "key": "TEST-1",
+                    "fields": {
+                        "summary": "Test summary",
+                        "status": {"name": "In Progress"},
+                        "description": {
+                            "type": "doc", "version": 1,
+                            "content": [{"type": "paragraph", "content": [{"text": "Fix the bug", "type": "text"}]}],
+                        },
+                    },
+                },
+                {"comments": [
+                    {"id": "7", "author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000",
+                     "body": {"type": "doc", "version": 1,
+                              "content": [{"type": "paragraph", "content": [{"text": "Looks good", "type": "text"}]}]}},
+                ]},
+            ]
+        )
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue(cfg, "TEST-1", fmt="json")
+        out = json.loads(capsys.readouterr().out)
+        assert out["key"] == "TEST-1"
+        assert out["summary"] == "Test summary"
+        assert out["description"] == "Fix the bug"
+        assert out["status"]["name"] == "In Progress"
+        assert [c["body"] for c in out["comments"]] == ["Looks good"]
+        assert out["comments"][0]["author"] == "Alice"
+        assert "raw" not in out
+
+    def test_cmd_issue_json_include_raw_v2_plain_bodies(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue
+
+        mock_get = MagicMock(
+            side_effect=[
+                {"key": "TEST-1", "fields": {"summary": "S", "description": "Plain wiki text"}},
+                {"comments": [
+                    {"id": "1", "author": {"displayName": "Bob"}, "created": "2024-01-01T00:00:00.000+0000", "body": "Plain comment"},
+                ]},
+            ]
+        )
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue(cfg, "TEST-1", fmt="json", include_raw=True)
+        out = json.loads(capsys.readouterr().out)
+        assert out["description"] == "Plain wiki text"
+        assert out["comments"][0]["body"] == "Plain comment"
+        assert out["raw"]["key"] == "TEST-1"
+
     def test_cmd_issue_comments(self, monkeypatch, capsys):
         from jira_cli.commands import cmd_issue_comments
 
@@ -1361,6 +1417,19 @@ class TestFlags:
         assert f["dir"] is None
         assert f["all"] is False
 
+    def test_parse_flags_json_alias(self):
+        from jira_cli.flags import parse_flags
+        r, f = parse_flags(["--json", "PROJ-1"])
+        assert f["format"] == "json"
+        assert r == ["PROJ-1"]
+
+    def test_parse_flags_include_raw(self):
+        from jira_cli.flags import parse_flags
+        r, f = parse_flags(["--include-raw"])
+        assert f["include_raw"] is True
+        r, f = parse_flags([])
+        assert f["include_raw"] is False
+
 
 # -------------------------------------------------------------------
 # CLI Dispatch
@@ -1432,6 +1501,28 @@ class TestCLIDispatch:
         from jira_cli.cli import main
         main()
         mock_cmd.assert_called_once()
+
+    def test_main_issue_format_json(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "--format", "json"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+        _, kwargs = mock_cmd.call_args
+        assert kwargs["fmt"] == "json"
+        assert kwargs["include_raw"] is False
+
+    def test_main_issue_json_alias_include_raw(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "--json", "--include-raw"])
+        mock_cmd = MagicMock()
+        monkeypatch.setattr("jira_cli.cli.cmd_issue", mock_cmd)
+        from jira_cli.cli import main
+        main()
+        mock_cmd.assert_called_once()
+        _, kwargs = mock_cmd.call_args
+        assert kwargs["fmt"] == "json"
+        assert kwargs["include_raw"] is True
 
     def test_main_issue_comments(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["jira-cli", "issue", "PROJ-123", "comments"])
@@ -1795,6 +1886,24 @@ class TestCommandCoverage:
         cmd_issue_comments(cfg, "TEST-1", limit=3, page=2)
         captured = capsys.readouterr()
         assert "page 2" in captured.out
+
+    def test_cmd_search_json_empty(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_search
+
+        mock_get = MagicMock(return_value={"issues": [], "total": 0})
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+
+        cmd_search({"url": "https://jira.x", "user": "u", "pass": "p"}, "project=NONE", fmt="json")
+        assert json.loads(capsys.readouterr().out) == []
+
+    def test_cmd_issue_comments_json_empty(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_comments
+
+        mock_get = MagicMock(return_value={"comments": [], "total": 0})
+        monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
+
+        cmd_issue_comments({"url": "https://jira.x", "user": "u", "pass": "p"}, "TEST-1", fmt="json")
+        assert json.loads(capsys.readouterr().out) == []
 
     def test_cmd_issue_comments_json(self, monkeypatch, capsys):
         from jira_cli.commands import cmd_issue_comments
