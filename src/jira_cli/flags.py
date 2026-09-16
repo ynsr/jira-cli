@@ -27,6 +27,8 @@ def parse_flags(args, known=()):
     dir_ = None
     all_ = False
     include_raw = False
+    yes = False
+    dry_run = False
     rest = []
     i = 0
     while i < len(args):
@@ -91,6 +93,12 @@ def parse_flags(args, known=()):
         elif a == "--include-raw":
             include_raw = True
             i += 1
+        elif a == "--yes":
+            yes = True
+            i += 1
+        elif a == "--dry-run":
+            dry_run = True
+            i += 1
         else:
             rest.append(a)
             i += 1
@@ -100,6 +108,7 @@ def parse_flags(args, known=()):
         "summary": summary, "description": description, "type": issue_type,
         "priority": priority, "assignee": assignee, "link_type": link_type,
         "comment": comment, "dir": dir_, "all": all_, "include_raw": include_raw,
+        "yes": yes, "dry_run": dry_run,
     }
 
 

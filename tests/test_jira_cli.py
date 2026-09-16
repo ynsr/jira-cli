@@ -1,8 +1,10 @@
 """Comprehensive pytest suite for jira-cli with coverage target >= 80%."""
 
+import io
 import json
 import os
 import sys
+import urllib.error
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
@@ -450,7 +452,7 @@ class TestCommandsUpdateStatus:
         monkeypatch.setattr("jira_cli.commands.jira_post", mock_post)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update_status(cfg, "PROJ-123", "41")
+        cmd_issue_update_status(cfg, "PROJ-123", "41", yes=True)
 
         mock_post.assert_called_once_with(
             cfg, "issue/PROJ-123/transitions", {"transition": {"id": "41"}}
@@ -465,7 +467,7 @@ class TestCommandsUpdateComment:
         monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body")
+        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body", yes=True)
 
         mock_put.assert_called_once_with(cfg, "issue/PROJ-123/comment/54321", {"body": "Updated body"})
 
@@ -568,7 +570,7 @@ class TestCommandsUpdateIssue:
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
         cmd_issue_update(
             cfg, "PROJ-123", summary="New title", description="New desc",
-            priority="High", assignee="jane.doe",
+            priority="High", assignee="jane.doe", yes=True,
         )
 
         payload = mock_put.call_args[0][2]
@@ -585,7 +587,7 @@ class TestCommandsUpdateIssue:
         monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update(cfg, "PROJ-123", summary="Only title")
+        cmd_issue_update(cfg, "PROJ-123", summary="Only title", yes=True)
         payload = mock_put.call_args[0][2]
         assert payload["fields"] == {"summary": "Only title"}
 
@@ -813,7 +815,7 @@ class TestApiVersionCompat:
         monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update(cfg, "PROJ-123", description="New desc")
+        cmd_issue_update(cfg, "PROJ-123", description="New desc", yes=True)
 
         payload = mock_put.call_args[0][2]
         assert payload["fields"]["description"] == "New desc"
@@ -826,7 +828,7 @@ class TestApiVersionCompat:
         monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update(cfg, "PROJ-123", description="New desc")
+        cmd_issue_update(cfg, "PROJ-123", description="New desc", yes=True)
 
         payload = mock_put.call_args[0][2]
         assert payload["fields"]["description"]["type"] == "doc"
@@ -862,7 +864,7 @@ class TestApiVersionCompat:
         monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body")
+        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body", yes=True)
         mock_put.assert_called_once_with(
             cfg, "issue/PROJ-123/comment/54321", {"body": "Updated body"})
 
@@ -874,7 +876,7 @@ class TestApiVersionCompat:
         monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body")
+        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "Updated body", yes=True)
         body = mock_put.call_args[0][2]["body"]
         assert body["type"] == "doc"
 
@@ -1091,7 +1093,7 @@ class TestCommandsDeleteAttachment:
         monkeypatch.setattr("jira_cli.commands.jira_delete_attachment", mock_del)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        deleted = cmd_issue_delete_attachment(cfg, "PROJ-123", attachment_ids=["1", "2"])
+        deleted = cmd_issue_delete_attachment(cfg, "PROJ-123", attachment_ids=["1", "2"], yes=True)
 
         assert deleted == ["1", "2"]
         assert mock_del.call_args_list == [call(cfg, "1"), call(cfg, "2")]
@@ -1110,7 +1112,7 @@ class TestCommandsDeleteAttachment:
         monkeypatch.setattr("jira_cli.commands.jira_delete_attachment", mock_del)
 
         cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
-        deleted = cmd_issue_delete_attachment(cfg, "PROJ-123", all_attachments=True)
+        deleted = cmd_issue_delete_attachment(cfg, "PROJ-123", all_attachments=True, yes=True)
 
         assert deleted == ["1", "2"]
         assert mock_del.call_count == 2
@@ -2103,6 +2105,113 @@ class TestCompletion:
         with pytest.raises(SystemExit):
             cmd_completion("tcsh")
 
+    def test_eval_lines(self):
+        from jira_cli.completion import eval_line
+        assert eval_line("bash") == 'eval "$(jira-cli completion bash)"'
+        assert eval_line("zsh") == 'eval "$(jira-cli completion zsh)"'
+        assert eval_line("fish") == "jira-cli completion fish | source"
+
+    def test_install_creates_marker_block(self, tmp_path):
+        from jira_cli.completion import install_completion, START_MARKER, END_MARKER
+
+        rc = tmp_path / "bashrc"
+        rc.write_text("export EDITOR=vim\n", encoding="utf-8")
+        path, changed = install_completion("bash", rcfile=str(rc))
+        assert changed is True
+        assert path == rc
+        content = rc.read_text(encoding="utf-8")
+        assert "export EDITOR=vim\n" in content            # existing content preserved
+        assert START_MARKER in content and END_MARKER in content
+        assert 'eval "$(jira-cli completion bash)"' in content
+        assert (tmp_path / "bashrc.bak").is_file()         # backup created
+
+    def test_install_is_idempotent(self, tmp_path):
+        from jira_cli.completion import install_completion
+
+        rc = tmp_path / "zshrc"
+        rc.write_text("autoload -U compinit && compinit\n", encoding="utf-8")
+        install_completion("zsh", rcfile=str(rc))
+        first = rc.read_text(encoding="utf-8")
+        path, changed = install_completion("zsh", rcfile=str(rc))
+        assert changed is False
+        assert rc.read_text(encoding="utf-8") == first      # byte-identical no-op
+        assert first.count("jira-cli completion zsh") == 1  # no duplicate block
+
+    def test_install_replaces_stale_block(self, tmp_path):
+        from jira_cli.completion import install_completion, START_MARKER, END_MARKER
+
+        rc = tmp_path / "bashrc"
+        rc.write_text(
+            f"{START_MARKER}\neval \"$(old-cmd completion bash)\"\n{END_MARKER}\n",
+            encoding="utf-8",
+        )
+        path, changed = install_completion("bash", rcfile=str(rc))
+        assert changed is True
+        content = rc.read_text(encoding="utf-8")
+        assert content.count(START_MARKER) == 1             # replaced, not duplicated
+        assert "old-cmd" not in content
+        assert 'eval "$(jira-cli completion bash)"' in content
+
+    def test_install_zsh_ensures_compinit(self, tmp_path):
+        from jira_cli.completion import install_completion
+
+        rc = tmp_path / "zshrc"
+        install_completion("zsh", rcfile=str(rc))
+        content = rc.read_text(encoding="utf-8")
+        assert "compinit" in content
+
+    def test_install_unsupported_shell_raises(self, tmp_path):
+        from jira_cli.completion import install_completion
+        with pytest.raises(ValueError):
+            install_completion("tcsh", rcfile=str(tmp_path / "rc"))
+
+    def test_install_cmd_requires_yes_when_non_tty(self, tmp_path, monkeypatch, capsys):
+        from jira_cli.completion import cmd_completion_install
+
+        monkeypatch.delenv("SHELL", raising=False)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        rc = tmp_path / "bashrc"
+        with pytest.raises(SystemExit):
+            cmd_completion_install(["bash", "--rcfile", str(rc)])
+        assert "requires --yes" in capsys.readouterr().err
+
+    def test_install_cmd_writes_with_yes(self, tmp_path, monkeypatch, capsys):
+        from jira_cli.completion import cmd_completion_install
+
+        rc = tmp_path / "bashrc"
+        cmd_completion_install(["bash", "--rcfile", str(rc), "--yes"])
+        err = capsys.readouterr().err
+        assert "installed" in err
+        assert 'eval "$(jira-cli completion bash)"' in rc.read_text(encoding="utf-8")
+
+    def test_install_cmd_unknown_shell_exits(self, capsys):
+        from jira_cli.completion import cmd_completion_install
+        with pytest.raises(SystemExit):
+            cmd_completion_install(["tcsh"])
+        assert "Unknown shell" in capsys.readouterr().err
+
+    def test_install_cmd_no_shell_detected_exits(self, monkeypatch, capsys):
+        from jira_cli.completion import cmd_completion_install
+
+        monkeypatch.delenv("SHELL", raising=False)
+        with pytest.raises(SystemExit):
+            cmd_completion_install([])
+        assert "cannot detect shell" in capsys.readouterr().err
+
+    def test_fish_completion_scoping_fixed(self, capsys):
+        from jira_cli.completion import cmd_completion
+        cmd_completion("fish")
+        out = capsys.readouterr().out
+        assert "set -l cmd" in out                      # function-local variables
+        assert "jira-cll" not in out                    # no command-name typo
+        assert "__fish_jira_cli_using_subcommand comments" in out  # matches issue subcommands
+        assert "transition" in out and "edit-comment" in out
+
+    def test_zsh_completion_ends_with_compdef(self, capsys):
+        from jira_cli.completion import cmd_completion
+        cmd_completion("zsh")
+        out = capsys.readouterr().out
+        assert out.rstrip().endswith("compdef _jira_cli jira-cli")
 
 # -------------------------------------------------------------------
 # Help texts
@@ -2131,3 +2240,274 @@ class TestHelpTexts:
         print_help("main")
         captured = capsys.readouterr()
         assert "JIRA-CLI HELP" in captured.out
+
+
+class TestVersionFlag:
+    def test_version_flag(self, monkeypatch, capsys):
+        from jira_cli.cli import main
+        from jira_cli import __version__
+
+        monkeypatch.setattr("sys.argv", ["jira-cli", "--version"])
+        main()
+        captured = capsys.readouterr()
+        assert captured.out.strip() == f"jira-cli {__version__}"
+
+
+class TestDestructiveGuards:
+    @pytest.fixture(autouse=True)
+    def _force_v2(self, monkeypatch):
+        """Keep dry-run/execute tests off the network via forced API version."""
+        monkeypatch.setenv("JIRA_API_VERSION", "2")
+
+    def test_dry_run_update_prints_request(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(cfg, "PROJ-123", summary="New title", dry_run=True)
+        out = capsys.readouterr().out
+        assert "DRY-RUN" in out
+        assert "PUT issue/PROJ-123" in out
+        assert '"summary": "New title"' in out
+        mock_put.assert_not_called()                     # nothing sent
+
+    def test_dry_run_edit_comment_prints_request(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_update_comment
+
+        mock_put = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update_comment(cfg, "PROJ-123", "54321", "New body", dry_run=True)
+        out = capsys.readouterr().out
+        assert "PUT issue/PROJ-123/comment/54321" in out
+        assert '"New body"' in out
+        mock_put.assert_not_called()
+
+    def test_dry_run_delete_attachment_prints_ids(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_delete_attachment
+
+        mock_del = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_delete_attachment", mock_del)
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_delete_attachment(cfg, "PROJ-123", attachment_ids=["1", "2"], dry_run=True)
+        out = capsys.readouterr().out
+        assert "DELETE" in out and "attachment_ids" in out
+        mock_del.assert_not_called()
+
+    def test_non_tty_without_yes_refuses(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit) as excinfo:
+            cmd_issue_update(cfg, "PROJ-123", summary="New title")
+        assert excinfo.value.code == 2
+        err = capsys.readouterr().err
+        assert "--yes" in err and "--dry-run" in err
+        mock_put.assert_not_called()
+
+    def test_tty_confirm_yes_executes(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock(return_value={})
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(cfg, "PROJ-123", summary="New title")
+        mock_put.assert_called_once()
+
+    def test_tty_confirm_declined_aborts(self, monkeypatch, capsys):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock()
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit):
+            cmd_issue_update(cfg, "PROJ-123", summary="New title")
+        assert "Aborted" in capsys.readouterr().err
+        mock_put.assert_not_called()
+
+
+class TestNetworkFlags:
+    def _reset(self):
+        from jira_cli.http import _reset_network_settings
+        _reset_network_settings()
+
+    def test_extract_network_flags_sets_settings(self, monkeypatch):
+        from jira_cli import http
+        from jira_cli.cli import _extract_network_flags
+
+        self._reset()
+        monkeypatch.setattr("sys.argv", ["jira-cli", "search", "--timeout", "5", "project=X", "--retries", "3", "--retry-delay", "0.5"])
+        _extract_network_flags()
+        assert http.get_network_settings() == (5.0, 3, 0.5)
+        assert sys.argv == ["jira-cli", "search", "project=X"]   # flags stripped
+        self._reset()
+
+    def test_extract_network_flags_ignores_bad_values(self, monkeypatch, capsys):
+        from jira_cli.cli import _extract_network_flags
+
+        monkeypatch.setattr("sys.argv", ["jira-cli", "search", "--timeout", "abc"])
+        with pytest.raises(SystemExit):
+            _extract_network_flags()
+        assert "numeric" in capsys.readouterr().err
+
+    def test_send_retries_with_backoff(self, monkeypatch):
+        from jira_cli import http
+
+        self._reset()
+        http.set_network_settings(timeout=5, retries=2, retry_delay=0.0)
+        sleeps = []
+        monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"ok": true}'
+
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            if len(calls) < 3:
+                raise urllib.error.URLError("connection reset")
+            return FakeResp()
+
+        monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+        req = urllib.request.Request("https://jira.x/rest/api/2/project")
+        assert http._send(req) == {"ok": True}
+        assert len(calls) == 3
+        assert sleeps == [0.0, 0.0]                      # exponential, base 0
+        self._reset()
+
+    def test_send_retries_http_5xx(self, monkeypatch):
+        from jira_cli import http
+
+        self._reset()
+        http.set_network_settings(retries=1, retry_delay=0.0)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(req.full_url, 503, "unavailable", {}, io.BytesIO(b""))
+            return FakeResp()
+
+        monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+        req = urllib.request.Request("https://jira.x/rest/api/2/project")
+        assert http._send(req) == {}
+        assert len(calls) == 2
+        self._reset()
+
+    def test_send_no_retry_on_4xx(self, monkeypatch):
+        from jira_cli import http
+
+        self._reset()
+        http.set_network_settings(retries=3, retry_delay=0.0)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 404, "not found", {}, io.BytesIO(b""))
+
+        monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+        req = urllib.request.Request("https://jira.x/rest/api/2/nope")
+        with pytest.raises(SystemExit):
+            http._send(req)
+        self._reset()
+
+    def test_send_write_retries_pre_send_error(self, monkeypatch):
+        from jira_cli import http
+
+        self._reset()
+        http.set_network_settings(retries=2, retry_delay=0.0)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+            return FakeResp()
+
+        monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+        req = urllib.request.Request(
+            "https://jira.x/rest/api/2/issue", data=b"{}", method="POST")
+        assert http._send(req) == {}
+        assert len(calls) == 2                     # connection refused = never sent → retried
+        self._reset()
+
+    def test_send_write_not_retried_on_ambiguous_error(self, monkeypatch):
+        from jira_cli import http
+
+        self._reset()
+        http.set_network_settings(retries=3, retry_delay=0.0)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            raise urllib.error.URLError("SSL: EOF occurred mid-request")
+
+        monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+        req = urllib.request.Request(
+            "https://jira.x/rest/api/2/issue", data=b"{}", method="POST")
+        with pytest.raises(SystemExit):
+            http._send(req)
+        assert len(calls) == 1                     # may have reached server → never retried
+        self._reset()
+
+    def test_send_write_not_retried_on_5xx(self, monkeypatch):
+        from jira_cli import http
+
+        self._reset()
+        http.set_network_settings(retries=3, retry_delay=0.0)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            raise urllib.error.HTTPError(req.full_url, 502, "bad gateway", {}, io.BytesIO(b""))
+
+        monkeypatch.setattr(http.urllib.request, "urlopen", fake_urlopen)
+        req = urllib.request.Request(
+            "https://jira.x/rest/api/2/issue", data=b"{}", method="POST")
+        with pytest.raises(SystemExit):
+            http._send(req)
+        assert len(calls) == 1                     # 5xx response on write → not retried
+        self._reset()

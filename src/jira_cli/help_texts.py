@@ -24,6 +24,7 @@ COMMANDS:
   issue <KEY> edit-comment <ID>   Edit an existing comment body
   setup                       Configure credentials
   completion <shell>          Print a shell completion script (bash, zsh, fish)
+  completion-install [shell]  Install the completion eval line into your rc file
   help                        This help text
 
 EXAMPLES:
@@ -43,6 +44,7 @@ EXAMPLES:
   jira-cli issue PROJ-123 transition 41
   jira-cli issue PROJ-123 edit-comment 12345 --body "Updated comment"
   jira-cli completion bash
+  jira-cli completion-install bash --yes
 
 AI USAGE:
   issues = run("jira-cli search --saved my-issues --limit 5 --format json")
@@ -50,6 +52,42 @@ AI USAGE:
   cmts   = run("jira-cli issue PROJ-123 comments --limit 3 --format json")
 
 Run 'jira-cli <command> -h' for per-command help with examples.
+
+GLOBAL FLAGS:
+  --version                   Print the version and exit
+  --timeout <sec>             Per-request network timeout (default: 30)
+  --retries <N>               Retries on timeout/5xx/429 with exponential backoff (default: 0)
+  --retry-delay <sec>         Base delay between retries; doubles each attempt (default: 1.0)
+
+DESTRUCTIVE ACTIONS (issue delete-attachment, edit-comment, transition, update):
+  --dry-run                   Print the request that would be sent, change nothing
+  --yes                       Execute without confirmation (required when non-interactive)
+
+Exit codes: 0 success, 1 error, 2 usage/refused destructive action.
+"""
+
+HELP["completion-install"] = """jira-cli completion-install — install shell completion into your rc file
+
+Usage:
+  jira-cli completion-install [shell] [--rcfile PATH] [--yes]
+
+Args:
+  [shell]           bash, zsh, or fish; omit to detect from $SHELL
+  --rcfile <PATH>   Rc file to edit (default: ~/.bashrc, ~/.zshrc, or ~/.config/fish/config.fish)
+  --yes             Skip confirmation (required when non-interactive)
+
+Writes an idempotent marker block into the rc file:
+  # >>> jira-cli completions >>>
+  eval "$(jira-cli completion bash)"
+  # <<< jira-cli completions <<<
+
+Re-running is a no-op; an existing block is replaced in place and a .bak
+backup is kept. After a change, restart your shell or run: source <rcfile>.
+
+EXAMPLES:
+  jira-cli completion-install bash
+  jira-cli completion-install zsh --rcfile ~/.zshrc --yes
+  jira-cli completion-install fish
 """
 
 HELP["search"] = """jira-cli search — search issues with JQL

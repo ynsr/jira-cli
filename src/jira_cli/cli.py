@@ -24,13 +24,12 @@ from jira_cli.commands import (
     cmd_issue_download_attachment,
     cmd_issue_delete_attachment,
 )
-from jira_cli.completion import cmd_completion
-
+from jira_cli.completion import cmd_completion, cmd_completion_install
 
 def print_usage_err():
     """Print short usage to stderr."""
     print("Usage: jira-cli <command> [args...] [-h]", file=sys.stderr)
-    print("Commands: projects, search, issue, create, link, setup, help, completion", file=sys.stderr)
+    print("Commands: projects, search, issue, create, link, setup, help, completion, completion-install", file=sys.stderr)
 
 
 def main():
@@ -42,14 +41,44 @@ def main():
     _dispatch()
 
 
+def _extract_network_flags():
+    """Pull --timeout/--retries/--retry-delay out of argv (global flags) and
+    apply them to the http module. Must run before command dispatch."""
+    from jira_cli import http
+
+    out = [sys.argv[0]]
+    vals = {}
+    i = 1
+    while i < len(sys.argv):
+        a = sys.argv[i]
+        if a in ("--timeout", "--retries", "--retry-delay") and i + 1 < len(sys.argv):
+            vals[a] = sys.argv[i + 1]
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    sys.argv[:] = out
+    if vals:
+        try:
+            http.set_network_settings(
+                timeout=vals.get("--timeout"),
+                retries=vals.get("--retries"),
+                retry_delay=vals.get("--retry-delay"),
+            )
+        except ValueError:
+            print("Error: --timeout/--retries/--retry-delay need numeric values.", file=sys.stderr)
+            sys.exit(2)
+
+
 def _dispatch():
     """Dispatch argv to sub-commands; returns None after each command."""
+    _extract_network_flags()
     cfg = load_config()
 
     # Config check — skip for setup and help
     needs_config = {"projects", "search", "issue", "create", "link"}
     cmd = sys.argv[1] if len(sys.argv) > 1 else None
-    if cmd not in ("setup", "help", "completion", None):
+    if cmd not in ("setup", "help", "completion", "completion-install", None):
         if not cfg.get("url") or not cfg.get("user") or not cfg.get("pass"):
             print("Jira not configured.", file=sys.stderr)
             print("  jira-cli setup", file=sys.stderr)
@@ -58,11 +87,17 @@ def _dispatch():
 
     if len(sys.argv) < 2:
         print("Usage: jira-cli <command> [args...] [-h]")
-        print("Commands: projects, search, issue, create, link, setup, help, completion")
+        print("Commands: projects, search, issue, create, link, setup, help, completion, completion-install")
         return
 
     cmd = sys.argv[1]
     args = sys.argv[2:]
+
+    # --version (before anything else; no config needed)
+    if cmd == "--version":
+        from jira_cli import __version__
+        print(f"jira-cli {__version__}")
+        return
 
     # --help / -h / help on root command
     if cmd in ("--help", "-h", "help"):
@@ -87,6 +122,12 @@ def _dispatch():
             print_help("main")
             return
         return cmd_completion(args[0])
+
+    if cmd == "completion-install":
+        if has_help_flag(args) or not args:
+            print_help("completion-install")
+            return
+        return cmd_completion_install(args)
 
     # --- projects ---
     if cmd == "projects":
@@ -208,14 +249,18 @@ def _dispatch():
             if not sub_args:
                 print("Usage: jira-cli issue <issue-key> transition <transition-id-or-name>", file=sys.stderr)
                 sys.exit(1)
-            return cmd_issue_update_status(cfg, issue_key, sub_args[0])
+            return cmd_issue_update_status(cfg, issue_key, sub_args[0],
+                                           yes=flags.get("yes", False),
+                                           dry_run=flags.get("dry_run", False))
 
         # issue <key> edit-comment <id>
         if sub == "edit-comment":
             if not sub_args:
                 print("Usage: jira-cli issue <issue-key> edit-comment <comment-id> --body <text>", file=sys.stderr)
                 sys.exit(1)
-            return cmd_issue_update_comment(cfg, issue_key, sub_args[0], flags.get("body", ""))
+            return cmd_issue_update_comment(cfg, issue_key, sub_args[0], flags.get("body", ""),
+                                            yes=flags.get("yes", False),
+                                            dry_run=flags.get("dry_run", False))
 
         # issue <key> attachments [--format json]
         if sub == "attachments":
@@ -239,6 +284,8 @@ def _dispatch():
                 cfg, issue_key,
                 attachment_ids=sub_args,
                 all_attachments=flags.get("all", False),
+                yes=flags.get("yes", False),
+                dry_run=flags.get("dry_run", False),
             )
 
         # issue <key> attach <file> [<file>...]
@@ -256,6 +303,8 @@ def _dispatch():
                 description=flags.get("description"),
                 priority=flags.get("priority"),
                 assignee=flags.get("assignee"),
+                yes=flags.get("yes", False),
+                dry_run=flags.get("dry_run", False),
             )
 
         print(f"Unknown issue subcommand: {sub}", file=sys.stderr)

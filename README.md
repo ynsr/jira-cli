@@ -36,6 +36,7 @@ jira-cli <command> [args...] [-h] [flags]
 | `setup`     | Configure Jira credentials                  |
 | `help`      | Print help text (AI-agent friendly)         |
 | `completion`| Print shell completion script               |
+| `completion-install` | Install completion into your rc file (idempotent) |
 
 ### Examples
 
@@ -62,6 +63,10 @@ jira-cli link BANKING-123 BANKING-456 --type Blocks --comment "Depends on this"
 jira-cli completion bash
 jira-cli completion zsh
 jira-cli completion fish
+jira-cli completion-install bash --yes
+jira-cli issue PROJ-123 delete-attachment 10001 --dry-run   # preview the request
+jira-cli issue PROJ-123 delete-attachment 10001 --yes       # execute non-interactively
+jira-cli --timeout 10 --retries 2 issue PROJ-123 comments   # network flags (global)
 ```
 
 ### Config

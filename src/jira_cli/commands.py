@@ -18,6 +18,34 @@ from jira_cli.help_texts import print_help
 CONFIG_PATH = __import__("jira_cli.config", fromlist=[""]).CONFIG_PATH
 
 
+def guard_destructive(action, method, path, payload=None, yes=False, dry_run=False):
+    """Gate destructive API calls. Returns True to proceed, False on dry-run.
+
+    --dry-run prints the request that would be sent (no network call).
+    Otherwise --yes is required to execute: on a TTY the user is prompted,
+    in a non-interactive session the command fails with an actionable message.
+    """
+    if dry_run:
+        print("DRY-RUN — request that would be sent:")
+        print(f"  {method} {path}")
+        if payload is not None:
+            print(f"  payload: {json.dumps(payload, indent=2)}")
+        return False
+    if yes:
+        return True
+    if sys.stdin.isatty():
+        try:
+            answer = input(f"{action} — proceed? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer in ("y", "yes"):
+            return True
+        print("Aborted.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Error: {action} is destructive. Re-run with --yes to execute or --dry-run to preview.", file=sys.stderr)
+    sys.exit(2)
+
+
 # -------------------------------------------------------------------
 # Command: projects
 # -------------------------------------------------------------------
@@ -237,10 +265,16 @@ def cmd_issue_add_comment(cfg, issue_key, body_text):
 # Command: issue transition (update status)
 # -------------------------------------------------------------------
 
-def cmd_issue_update_status(cfg, issue_key, transition_id_or_name):
+def cmd_issue_update_status(cfg, issue_key, transition_id_or_name,
+                            yes=False, dry_run=False):
     """Transition an issue to a new status."""
     # Try numeric transition ID first, then name
     data = {"transition": {"id": transition_id_or_name}}
+    if not guard_destructive(
+        f"Transition {issue_key} to '{transition_id_or_name}'",
+        "POST", f"issue/{issue_key}/transitions", data, yes, dry_run,
+    ):
+        return None
     result = jira_post(cfg, f"issue/{issue_key}/transitions", data)
     print(f"\n\033[1mTransition applied to {issue_key}\033[0m")
     return result
@@ -250,7 +284,8 @@ def cmd_issue_update_status(cfg, issue_key, transition_id_or_name):
 # Command: issue edit-comment
 # -------------------------------------------------------------------
 
-def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text):
+def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text,
+                             yes=False, dry_run=False):
     """Update/replace the body of an existing comment."""
     if not body_text:
         print("Error: comment body is empty.", file=sys.stderr)
@@ -258,6 +293,11 @@ def cmd_issue_update_comment(cfg, issue_key, comment_id, body_text):
 
     ensure_api_version_detected(cfg)
     data = {"body": comment_body(body_text)}
+    if not guard_destructive(
+        f"Edit comment #{comment_id} on {issue_key}",
+        "PUT", f"issue/{issue_key}/comment/{comment_id}", data, yes, dry_run,
+    ):
+        return None
     result = jira_put(cfg, f"issue/{issue_key}/comment/{comment_id}", data)
     updated_c = fmt_date(result.get("updated", ""))
     print(f"\n\033[1mComment #{comment_id} updated on {issue_key}\033[0m")
@@ -321,7 +361,7 @@ def cmd_link_issues(cfg, outward_key, inward_key, link_type="Relates", comment=N
 # -------------------------------------------------------------------
 
 def cmd_issue_update(cfg, issue_key, summary=None, description=None,
-                     priority=None, assignee=None):
+                     priority=None, assignee=None, yes=False, dry_run=False):
     """Update editable fields of an issue (summary/description/priority/assignee)."""
     ensure_api_version_detected(cfg)
 
@@ -339,6 +379,11 @@ def cmd_issue_update(cfg, issue_key, summary=None, description=None,
         print("Error: nothing to update. Use --summary, --description, --priority, or --assignee.", file=sys.stderr)
         sys.exit(1)
 
+    if not guard_destructive(
+        f"Update {issue_key}",
+        "PUT", f"issue/{issue_key}", {"fields": fields}, yes, dry_run,
+    ):
+        return None
     result = jira_put(cfg, f"issue/{issue_key}", {"fields": fields})
     changed = ", ".join(fields.keys())
     print(f"\n\033[1mUpdated {issue_key}: {changed}\033[0m")
@@ -433,7 +478,8 @@ def cmd_issue_download_attachment(cfg, issue_key, attachment_ids=None,
 # Command: issue delete attachments
 # -------------------------------------------------------------------
 
-def cmd_issue_delete_attachment(cfg, issue_key, attachment_ids=None, all_attachments=False):
+def cmd_issue_delete_attachment(cfg, issue_key, attachment_ids=None,
+                                all_attachments=False, yes=False, dry_run=False):
     """Delete attachment(s) of an issue. Returns list of deleted ids."""
     if all_attachments:
         ids = [a.get("id") for a in _get_attachments_meta(cfg, issue_key)]
@@ -443,6 +489,13 @@ def cmd_issue_delete_attachment(cfg, issue_key, attachment_ids=None, all_attachm
     if not ids:
         print("No attachments to delete.")
         return []
+
+    if not guard_destructive(
+        f"Delete {len(ids)} attachment(s) from {issue_key}",
+        "DELETE", f"attachment/{{id}} for ids: {', '.join(str(i) for i in ids)}",
+        {"attachment_ids": ids}, yes, dry_run,
+    ):
+        return None
 
     deleted = []
     for aid in ids:

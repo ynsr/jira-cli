@@ -24,6 +24,7 @@ import base64
 import json
 import mimetypes
 import os
+import socket
 import sys
 import urllib.error
 import urllib.parse
@@ -35,6 +36,39 @@ import uuid
 # ---------------------------------------------------------------------------
 
 _WRITE_API_VERSION = None  # cached detected/forced version; None until detected
+
+# ---------------------------------------------------------------------------
+# Network tuning (--timeout / --retries / --retry-delay globals)
+# ---------------------------------------------------------------------------
+
+_TIMEOUT = 30.0      # per-request timeout, seconds
+_RETRIES = 0         # extra attempts on retryable failures
+_RETRY_DELAY = 1.0   # base delay, seconds; doubles each retry (exponential)
+
+_RETRYABLE_STATUS = frozenset((429, 500, 502, 503, 504))
+
+
+def set_network_settings(timeout=None, retries=None, retry_delay=None):
+    """Override global network defaults (called from the CLI dispatcher)."""
+    global _TIMEOUT, _RETRIES, _RETRY_DELAY
+    if timeout is not None:
+        _TIMEOUT = float(timeout)
+    if retries is not None:
+        _RETRIES = max(0, int(retries))
+    if retry_delay is not None:
+        _RETRY_DELAY = max(0.0, float(retry_delay))
+
+
+def get_network_settings():
+    """Return the active (timeout, retries, retry_delay) settings."""
+    return _TIMEOUT, _RETRIES, _RETRY_DELAY
+
+
+def _reset_network_settings():
+    """Restore defaults (used by tests)."""
+    global _TIMEOUT, _RETRIES, _RETRY_DELAY
+    _TIMEOUT, _RETRIES, _RETRY_DELAY = 30.0, 0, 1.0
+
 _DETECTION_ERROR = False   # set when detection HTTP fails; keeps us on v2
 
 
@@ -171,27 +205,75 @@ def auth_header(cfg):
 
 
 def _send(req, raw=False):
-    """Send a prepared request; return parsed JSON ({} on empty body) or raw bytes when raw. Exits on error."""
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read()
-            if raw:
-                return data
-            if not data:
-                return {}
-            return json.loads(data)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
+    """Send a prepared request; return parsed JSON ({} on empty body) or raw bytes when raw. Exits on error.
+
+    Retries retryable failures with exponential backoff:
+    delay = _RETRY_DELAY * 2**attempt.
+
+    Idempotency rule: reads (GET/HEAD) retry on timeouts, connection errors,
+    and HTTP 429/5xx. Writes (POST/PUT/DELETE) only retry on errors that
+    provably happened before the request reached the server (connection
+    refused, DNS failure) so a side-effecting call is never sent twice.
+    """
+    attempts = _RETRIES + 1
+    for attempt in range(attempts):
         try:
-            err = json.loads(body)
-            msg = err.get("errorMessages", [str(e)])
-        except json.JSONDecodeError:
-            msg = [body or str(e)]
-        print(f"ERROR {e.code}: {'; '.join(msg)}", file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as e:
-        print(f"ERROR: {e.reason}", file=sys.stderr)
-        sys.exit(1)
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                data = resp.read()
+                if raw:
+                    return data
+                if not data:
+                    return {}
+                return json.loads(data)
+        except urllib.error.HTTPError as e:
+            if e.code in _RETRYABLE_STATUS and _can_retry(req, attempt, attempts) and req.get_method().upper() in ("GET", "HEAD"):
+                _retry_wait(attempt, f"HTTP {e.code} ({req.get_method()} {req.full_url})")
+                continue
+            body = e.read().decode()
+            try:
+                err = json.loads(body)
+                msg = err.get("errorMessages", [str(e)])
+            except json.JSONDecodeError:
+                msg = [body or str(e)]
+            print(f"ERROR {e.code}: {'; '.join(msg)}", file=sys.stderr)
+            sys.exit(1)
+        except urllib.error.URLError as e:
+            if _can_retry(req, attempt, attempts) and (
+                _is_pre_send_error(e) or req.get_method().upper() in ("GET", "HEAD")
+            ):
+                _retry_wait(attempt, f"{e.reason} ({req.get_method()} {req.full_url})")
+                continue
+            print(f"ERROR: {e.reason}", file=sys.stderr)
+            sys.exit(1)
+        except (TimeoutError, OSError) as e:  # bare socket timeouts
+            if _can_retry(req, attempt, attempts) and req.get_method().upper() in ("GET", "HEAD"):
+                _retry_wait(attempt, f"timeout ({req.get_method()} {req.full_url})")
+                continue
+            print(f"ERROR: request timed out after {_TIMEOUT}s", file=sys.stderr)
+            sys.exit(1)
+
+
+_PRE_SEND_REASONS = (ConnectionRefusedError, socket.gaierror, ConnectionResetError)
+
+
+def _is_pre_send_error(e):
+    """True when a URLError provably failed before the request was sent."""
+    reason = getattr(e, "reason", None)
+    return isinstance(reason, _PRE_SEND_REASONS)
+
+
+def _can_retry(req, attempt, attempts):
+    """True when another attempt remains."""
+    return attempt < attempts - 1
+
+
+def _retry_wait(attempt, detail):
+    """Sleep before retrying; delay doubles each attempt. Announces on stderr."""
+    import time
+
+    delay = _RETRY_DELAY * (2 ** attempt)
+    print(f"retrying in {delay:g}s (attempt {attempt + 2}/{_RETRIES + 1}): {detail}", file=sys.stderr)
+    time.sleep(delay)
 
 
 def _request(cfg, method, path, data=None, params=None):
