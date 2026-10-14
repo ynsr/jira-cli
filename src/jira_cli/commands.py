@@ -13,6 +13,7 @@ from jira_cli.http import (
     jira_get_binary, jira_delete_attachment,
 )
 from jira_cli.format import fmt_date, status_badge, priority_label, extract_adf_text, truncate
+from jira_cli.fields import extract_agile_fields
 from jira_cli.help_texts import print_help
 
 CONFIG_PATH = __import__("jira_cli.config", fromlist=[""]).CONFIG_PATH
@@ -62,22 +63,70 @@ def cmd_projects(cfg):
     print(f"\n\033[1m{len(data)} projects\033[0m")
 
 
-# -------------------------------------------------------------------
-# Command: search
-# -------------------------------------------------------------------
+def _project_for_field_cache(jql=None, issues=(), issue_key=None):
+    """Best-effort project key for the field-ID cache scope.
+
+    From an explicit issue key, else the first issue's project/key, else a
+    ``project=X`` token in the JQL, else ``"global"``.
+    """
+    if issue_key and "-" in issue_key:
+        return issue_key.split("-", 1)[0].upper()
+    for iss in issues or []:
+        proj = ((iss.get("fields") or {}).get("project") or {}).get("key")
+        if proj:
+            return str(proj).upper()
+        key = iss.get("key") or ""
+        if "-" in key:
+            return key.split("-", 1)[0].upper()
+    import re as _re
+
+    m = _re.search(r"project\s*=\s*([A-Za-z0-9_]+)", jql or "")
+    if m:
+        return m.group(1).upper()
+    return "global"
+
+
+def _agile_json_fields(fields, cfg=None, project=None):
+    """Curated agile keys merged into search JSON payloads (no-op when absent)."""
+    agile = extract_agile_fields(fields or {}, cfg, project)
+    out = {}
+    if agile["resolution"] is not None and not isinstance((fields or {}).get("resolution"), dict):
+        out["resolution"] = agile["resolution"]
+    if agile["story_points"] is not None:
+        out["story_points"] = agile["story_points"]
+    if agile["sprint"]:
+        out["sprint"] = agile["sprint"]
+    return out
+
+
+def _agile_table_suffix(agile):
+    """Compact one-line 'Resolution: X | SP: N | Sprint: Y' suffix ('' when empty)."""
+    parts = []
+    if agile.get("resolution"):
+        parts.append(f"Resolution: {agile['resolution']}")
+    if agile.get("story_points") is not None:
+        parts.append(f"SP: {agile['story_points']}")
+    if agile.get("sprint"):
+        parts.append(f"Sprint: {', '.join(agile['sprint'])}")
+    return " | ".join(parts)
+
 
 def cmd_search(cfg, jql, limit=20, fmt="table"):
     """Search issues with JQL. fmt: table|json."""
     params = {
         "jql": jql,
         "maxResults": limit,
-        "fields": "summary,status,priority,assignee,created,updated,issuetype,reporter",
+        "fields": "summary,status,priority,assignee,created,updated,issuetype,reporter,resolution,*navigable",
     }
     data = jira_get(cfg, "search", params)
     issues = data.get("issues", [])
     total = data.get("total", 0)
 
     if fmt == "json":
+        proj = _project_for_field_cache(jql=jql, issues=issues)
+        for iss in issues:
+            iss.setdefault("fields", {}).update(
+                _agile_json_fields(iss.get("fields", {}), cfg, proj))
         print(json.dumps(issues, indent=2))
         return
     if not issues:
@@ -89,6 +138,7 @@ def cmd_search(cfg, jql, limit=20, fmt="table"):
     for iss in issues:
         key = iss["key"]
         f = iss.get("fields", {})
+        agile = extract_agile_fields(f, cfg, _project_for_field_cache(jql=jql, issues=issues))
         summary = f.get("summary", "")[:70]
         status = f.get("status", {}).get("name", "")
         priority = f.get("priority", {})
@@ -98,6 +148,9 @@ def cmd_search(cfg, jql, limit=20, fmt="table"):
         pname = priority.get("name", "") if priority else ""
         print(f"  \033[1m{key}\033[0m  {status_badge(status):20} {pname:10} {assignee_name:20} {created}")
         print(f"       {summary}")
+        extra = _agile_table_suffix(agile)
+        if extra:
+            print(f"       \033[38;5;244m{extra}\033[0m")
         print()
 
 
@@ -113,6 +166,7 @@ def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
     comments = cmts_data.get("comments", [])
 
     if fmt == "json":
+        agile = extract_agile_fields(f, cfg, _project_for_field_cache(issue_key=issue_key, issues=[data]))
         out = {
             "key": data.get("key", issue_key),
             "summary": f.get("summary", ""),
@@ -126,6 +180,9 @@ def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
             "updated": f.get("updated", ""),
             "project": f.get("project") or {},
             "labels": f.get("labels") or [],
+            "resolution": agile["resolution"],
+            "story_points": agile["story_points"],
+            "sprint": agile["sprint"],
             "comments": [
                 {
                     "id": c.get("id", ""),
@@ -161,6 +218,13 @@ def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
     print(f"  Created:   {created}")
     print(f"  Updated:   {updated}")
     print(f"  Project:   {f.get('project', {}).get('name','')} ({f.get('project', {}).get('key','')})")
+    agile = extract_agile_fields(f, cfg, _project_for_field_cache(issue_key=issue_key, issues=[data]))
+    if agile["resolution"]:
+        print(f"  Resolution: {agile['resolution']}")
+    if agile["story_points"] is not None:
+        print(f"  Story Points: {agile['story_points']}")
+    if agile["sprint"]:
+        print(f"  Sprint:    {', '.join(agile['sprint'])}")
 
     desc = f.get("description")
     if desc:

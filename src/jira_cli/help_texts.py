@@ -104,6 +104,9 @@ Args:
   --limit <N>         Max results (default: 20)
   --format <fmt>      Output: table (default) or json
 
+Output: table rows show summary + a Resolution/SP/Sprint suffix when present;
+  json payloads add curated "resolution", "story_points", "sprint" keys.
+
 Available --saved filters:
 """ + "\n".join(f"  {n:20} {v['desc']}" for n, v in sorted(FILTERS.items())) + """
 
@@ -133,6 +136,9 @@ Flags for 'issue <KEY>' detail view:
   --format <fmt>      table (default) or json
   --json              Shorthand for --format json
   --include-raw       With json output: add "raw" key holding the untouched Jira payload
+
+Detail views always include Resolution, Story Points, and Sprint when set
+(json keys: "resolution", "story_points", "sprint").
 
 Flags for 'comments' subcommand:
   --limit <N>         Comments per page (default: 5)

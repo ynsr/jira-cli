@@ -29,6 +29,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short --cov=src/jira_cli --cov-report=term-missing"
+markers = ["real_field_cache: opt out of the autouse field-cache stub to test real lookup"]
 
 [tool.coverage.run]
 source = ["src"]
