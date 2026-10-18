@@ -12,6 +12,7 @@ from jira_cli.commands import (
     cmd_issue,
     cmd_issue_comments,
     cmd_issue_comment,
+    cmd_issue_changelog,
     cmd_issue_add_comment,
     cmd_setup,
     cmd_issue_update_status,
@@ -160,7 +161,14 @@ def _dispatch():
         if not jql:
             print_help("search")
             sys.exit(1)
-        return cmd_search(cfg, jql, flags["limit"], flags["format"])
+        return cmd_search(cfg, jql, flags["limit"], flags["format"],
+                          start_at=flags.get("start_at", 0),
+                          fetch_all=flags.get("all", False),
+                          max_results=flags.get("max_results", 1000),
+                          fields=flags.get("fields"),
+                          expand=flags.get("expand") or None,
+                          envelope=flags.get("envelope", False),
+                          changelog_fields=flags.get("changelog_fields"))
 
     # --- create ---
     if cmd == "create":
@@ -230,6 +238,15 @@ def _dispatch():
                 limit=flags["limit"],
                 page=flags["page"],
                 desc=flags["desc"],
+                fmt=flags["format"],
+            )
+
+        # issue <key> changelog
+        if sub == "changelog":
+            return cmd_issue_changelog(
+                cfg, issue_key,
+                changelog_fields=flags.get("changelog_fields"),
+                since=flags.get("since"),
                 fmt=flags["format"],
             )
 
