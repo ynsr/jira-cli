@@ -280,7 +280,8 @@ so all closed pages are read and the tail by (completeDate, endDate, id) kept.
 Moves write a journal file BEFORE any write call (0600), move in chunks of 50
 via POST sprint/{id}/issue (unverified live — a 405 names method+path), then
 re-read each issue and VERIFY membership. 'restore' replays a journal grouped
-by recorded origin sprint; closed destinations are refused (exit 1).
+by recorded origin sprint (source journal never modified — a separate
+sprint.restore audit journal is written first); closed destinations are refused (exit 1).
 
 EXAMPLES:
   jira-cli sprint list --board 3 --state active,future

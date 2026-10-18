@@ -2931,10 +2931,11 @@ class TestPlannerSupport:
     def test_restore_round_trip(self, monkeypatch, tmp_path):
         from jira_cli import agile as A
         journal = tmp_path / "move.json"
-        journal.write_text(json.dumps({"created_at": "t", "user": "u",
-                                       "base_url": "b", "action": "sprint.move",
-                                       "items": [{"key": "IPG-1", "from_sprint_ids": [547],
-                                                  "to": "548"}]}))
+        before = json.dumps({"created_at": "t", "user": "u",
+                             "base_url": "b", "action": "sprint.move",
+                             "items": [{"key": "IPG-1", "from_sprint_ids": [547],
+                                        "to": "548"}]})
+        journal.write_text(before)
         posts = []
         monkeypatch.setattr("jira_cli.agile.jira_get",
                             lambda c, p, params=None: {"key": "IPG-1", "fields": {}})
@@ -2944,5 +2945,12 @@ class TestPlannerSupport:
         monkeypatch.setattr(A, "agile_post", lambda c, p, d: posts.append(p) or {})
         # membership flips to the destination after the write
         monkeypatch.setattr(A, "_current_sprint_ids", lambda c, k, sid=None: [547])
-        A.cmd_sprint_restore(self.CFG, str(journal), yes=True)
+        monkeypatch.chdir(tmp_path)
+        audit_path = A.cmd_sprint_restore(self.CFG, str(journal), yes=True)
         assert "sprint/547/issue" in posts
+        # source journal untouched; separate audit file returned
+        assert journal.read_text() == before
+        assert audit_path != str(journal)
+        audit = json.loads(open(audit_path, encoding="utf-8").read())
+        assert audit["action"] == "sprint.restore"
+        assert audit["restores"] == str(journal)

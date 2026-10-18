@@ -286,7 +286,7 @@ def _chunked(seq, size):
     return [seq[i:i + size] for i in range(0, len(seq), size)]
 
 
-def _do_move(cfg, keys, to, journal, yes, dry_run, action):
+def _do_move(cfg, keys, to, journal, yes, dry_run, action, skip_journal=False):
     """Validate -> journal-before-write -> chunked POSTs -> verify. Returns journal path."""
     from jira_cli.fields import parse_sprints  # noqa: F401 (re-export guard)
 
@@ -301,15 +301,16 @@ def _do_move(cfg, keys, to, journal, yes, dry_run, action):
             sys.exit(1)
         from_ids = _current_sprint_ids(cfg, key)
         items.append({"key": key, "from_sprint_ids": from_ids, "to": to})
-    # 2. journal BEFORE any write
+    # 2. journal BEFORE any write (unless the caller already journaled this run)
     import datetime as _dt
-    payload = {"created_at": _dt.datetime.now().isoformat(timespec="seconds"),
-               "user": cfg.get("user", ""),
-               "base_url": cfg.get("url", ""),
-               "action": action,
-               "items": items}
-    journal_path = _journal_path_for(journal, action)
-    _write_journal(journal_path, payload)
+    journal_path = _journal_path_for(journal, action) if not skip_journal else journal
+    if not skip_journal:
+        payload = {"created_at": _dt.datetime.now().isoformat(timespec="seconds"),
+                   "user": cfg.get("user", ""),
+                   "base_url": cfg.get("url", ""),
+                   "action": action,
+                   "items": items}
+        _write_journal(journal_path, payload)
     # 3. gate
     target_desc = f"sprint {to}" if to != "backlog" else "backlog"
     plan = f"Move {len(keys)} issue(s) to {target_desc}"
@@ -400,10 +401,23 @@ def cmd_sprint_restore(cfg, journal_file, yes=False, dry_run=False):
                 print(f"Error: cannot restore to closed sprint {dest} "
                       f"({sp.get('name')}); move those issues manually.", file=sys.stderr)
                 sys.exit(1)
+    # One audit journal for this restore run, written BEFORE any write call.
+    # The source journal is never modified.
+    import datetime as _dt
+    audit = {"created_at": _dt.datetime.now().isoformat(timespec="seconds"),
+             "user": cfg.get("user", ""),
+             "base_url": cfg.get("url", ""),
+             "action": "sprint.restore",
+             "restores": journal_file,
+             "items": items}
+    audit_path = _journal_path_for(None, "sprint.restore")
+    _write_journal(audit_path, audit)
+    print(f"  audit journal: {audit_path}")
     for dest, keys in sorted(groups.items()):
-        _do_move(cfg, keys, dest, journal_file, True, False, "sprint.restore")
+        _do_move(cfg, keys, dest, audit_path, True, False,
+                 "sprint.restore", skip_journal=True)
     print(f"{plan} — verified.")
-    return journal_file
+    return audit_path
 
 
 # -------------------------------------------------------------------
