@@ -216,8 +216,10 @@ def _journal_path_for(journal, action):
     if journal:
         return journal
     import datetime as _dt
+    import re as _re
+    safe = _re.sub(r"[^A-Za-z0-9_.-]+", ".", str(action))
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"./jira-cli-{action}-{stamp}.json"
+    return f"./jira-cli-{safe}-{stamp}.json"
 
 
 def _current_sprint_ids(cfg, issue_key, sprint_field_id=None):
@@ -399,8 +401,7 @@ def cmd_sprint_restore(cfg, journal_file, yes=False, dry_run=False):
                       f"({sp.get('name')}); move those issues manually.", file=sys.stderr)
                 sys.exit(1)
     for dest, keys in sorted(groups.items()):
-        _do_move(cfg, keys, dest, None, True, False,
-                 f"sprint.restore->{dest}")
+        _do_move(cfg, keys, dest, journal_file, True, False, "sprint.restore")
     print(f"{plan} — verified.")
     return journal_file
 
