@@ -22,7 +22,7 @@ def _isolate_field_cache(monkeypatch, tmp_path, request):
     if "real_field_cache" not in getattr(request, "keywords", {}):
         monkeypatch.setattr(
             _fields_mod, "get_custom_field_ids",
-            lambda cfg, project=None: {"story_points": None, "sprint": None},
+            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None},
         )
     yield
     _fields_mod._reset_field_cache()
@@ -2562,6 +2562,9 @@ class TestAgileFields:
             "resolution": "Fixed",
             "story_points": 3,
             "sprint": ["Alpha (ACTIVE)"],
+            "sprints": [{"id": 9, "name": "Alpha", "state": "ACTIVE",
+                         "start": "2024-01-01", "end": ""}],
+            "epic_key": None,
         }
 
     def test_extract_absent_and_bool_safe(self):
@@ -2569,16 +2572,21 @@ class TestAgileFields:
 
         assert extract_agile_fields({}) == {
             "resolution": None, "story_points": None, "sprint": [],
+            "sprints": [], "epic_key": None,
         }
         agile = extract_agile_fields({"resolution": None, "customfield_1": True})
         assert agile["story_points"] is None
         assert agile["sprint"] == []
+        assert agile["sprints"] == []
+        assert agile["epic_key"] is None
 
     def test_extract_dict_sprint(self):
         from jira_cli.fields import extract_agile_fields
 
         agile = extract_agile_fields({"customfield_2": [{"name": "Beta", "state": "CLOSED"}]})
         assert agile["sprint"] == ["Beta (CLOSED)"]
+        assert agile["sprints"] == [{"id": None, "name": "Beta", "state": "CLOSED",
+                                    "start": "", "end": ""}]
 
     def test_search_table_suffix(self, monkeypatch, capsys, tmp_path):
         from jira_cli.commands import cmd_search
@@ -2589,7 +2597,7 @@ class TestAgileFields:
         })
         monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
         monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
-                            lambda cfg, project=None: {"story_points": None, "sprint": None})
+                            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None})
         cmd_search({"url": "https://jira.x", "user": "u", "pass": "p"}, "project=T")
         out = capsys.readouterr().out
         assert "Resolution: Fixed | SP: 3 | Sprint: Alpha (ACTIVE)" in out
@@ -2606,7 +2614,7 @@ class TestAgileFields:
         })
         monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
         monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
-                            lambda cfg, project=None: {"story_points": None, "sprint": None})
+                            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None})
         cmd_search({"url": "https://jira.x", "user": "u", "pass": "p"}, "project=T", fmt="json")
         payload = json.loads(capsys.readouterr().out)
         assert payload[0]["fields"]["story_points"] == 3
@@ -2619,7 +2627,7 @@ class TestAgileFields:
         detail = {"key": "T-1", "fields": dict(
             self._fields(), project={"name": "P", "key": "T"})}
         monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
-                            lambda cfg, project=None: {"story_points": None, "sprint": None})
+                            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None})
         mock_get = MagicMock(side_effect=[detail, {"comments": [], "total": 0}])
         monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
         cmd_issue({"url": "https://jira.x", "user": "u", "pass": "p"}, "T-1")
@@ -2644,10 +2652,13 @@ class TestFieldIdCache:
     CFG = {"url": "https://jira.example.com", "user": "u", "pass": "p"}
 
     FIELD_LIST = [
-        {"id": "customfield_10016", "name": "Story Points"},
+        {"id": "customfield_10016", "name": "Original Story Points"},
         {"id": "customfield_10020", "name": "Sprint"},
+        {"id": "customfield_10021", "name": "Epic Link"},
         {"id": "summary", "name": "Summary"},
     ]
+    EXPECTED_IDS = {"story_points": "customfield_10016", "sprint": "customfield_10020",
+                    "epic_link": "customfield_10021"}
 
     def _isolate(self, monkeypatch, tmp_path):
         from jira_cli import fields as _fields_mod
@@ -2666,7 +2677,7 @@ class TestFieldIdCache:
 
         monkeypatch.setattr("jira_cli.http.jira_get", fake_get)
         ids = mod.get_custom_field_ids(self.CFG, "BANKING")
-        assert ids == {"story_points": "customfield_10016", "sprint": "customfield_10020"}
+        assert ids == self.EXPECTED_IDS
         assert seen == [(self.CFG, "field")]
 
         # Second call: memory cache, no new fetch.
@@ -2730,7 +2741,7 @@ class TestFieldIdCache:
         monkeypatch.setattr("jira_cli.http.jira_get", boom)
         mod._reset_field_cache()
         ids = mod.get_custom_field_ids(self.CFG, "P")
-        assert ids == {"story_points": "customfield_10016", "sprint": "customfield_10020"}
+        assert ids == self.EXPECTED_IDS
 
     def test_exact_ids_preferred_over_shape(self, monkeypatch, tmp_path):
         mod = self._isolate(monkeypatch, tmp_path)

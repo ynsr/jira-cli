@@ -96,6 +96,10 @@ def _agile_json_fields(fields, cfg=None, project=None):
         out["story_points"] = agile["story_points"]
     if agile["sprint"]:
         out["sprint"] = agile["sprint"]
+    if agile["sprints"]:
+        out["sprints"] = agile["sprints"]
+    if agile["epic_key"] is not None:
+        out["epic_key"] = agile["epic_key"]
     return out
 
 
@@ -183,6 +187,8 @@ def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
             "resolution": agile["resolution"],
             "story_points": agile["story_points"],
             "sprint": agile["sprint"],
+            "sprints": agile["sprints"],
+            "epic_key": agile["epic_key"],
             "comments": [
                 {
                     "id": c.get("id", ""),
