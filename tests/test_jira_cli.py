@@ -22,7 +22,7 @@ def _isolate_field_cache(monkeypatch, tmp_path, request):
     if "real_field_cache" not in getattr(request, "keywords", {}):
         monkeypatch.setattr(
             _fields_mod, "get_custom_field_ids",
-            lambda cfg, project=None: {"story_points": None, "sprint": None},
+            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None},
         )
     yield
     _fields_mod._reset_field_cache()
@@ -2562,6 +2562,9 @@ class TestAgileFields:
             "resolution": "Fixed",
             "story_points": 3,
             "sprint": ["Alpha (ACTIVE)"],
+            "sprints": [{"id": 9, "name": "Alpha", "state": "ACTIVE",
+                         "start": "2024-01-01", "end": ""}],
+            "epic_key": None,
         }
 
     def test_extract_absent_and_bool_safe(self):
@@ -2569,16 +2572,21 @@ class TestAgileFields:
 
         assert extract_agile_fields({}) == {
             "resolution": None, "story_points": None, "sprint": [],
+            "sprints": [], "epic_key": None,
         }
         agile = extract_agile_fields({"resolution": None, "customfield_1": True})
         assert agile["story_points"] is None
         assert agile["sprint"] == []
+        assert agile["sprints"] == []
+        assert agile["epic_key"] is None
 
     def test_extract_dict_sprint(self):
         from jira_cli.fields import extract_agile_fields
 
         agile = extract_agile_fields({"customfield_2": [{"name": "Beta", "state": "CLOSED"}]})
         assert agile["sprint"] == ["Beta (CLOSED)"]
+        assert agile["sprints"] == [{"id": None, "name": "Beta", "state": "CLOSED",
+                                    "start": "", "end": ""}]
 
     def test_search_table_suffix(self, monkeypatch, capsys, tmp_path):
         from jira_cli.commands import cmd_search
@@ -2589,7 +2597,7 @@ class TestAgileFields:
         })
         monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
         monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
-                            lambda cfg, project=None: {"story_points": None, "sprint": None})
+                            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None})
         cmd_search({"url": "https://jira.x", "user": "u", "pass": "p"}, "project=T")
         out = capsys.readouterr().out
         assert "Resolution: Fixed | SP: 3 | Sprint: Alpha (ACTIVE)" in out
@@ -2606,7 +2614,7 @@ class TestAgileFields:
         })
         monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
         monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
-                            lambda cfg, project=None: {"story_points": None, "sprint": None})
+                            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None})
         cmd_search({"url": "https://jira.x", "user": "u", "pass": "p"}, "project=T", fmt="json")
         payload = json.loads(capsys.readouterr().out)
         assert payload[0]["fields"]["story_points"] == 3
@@ -2619,7 +2627,7 @@ class TestAgileFields:
         detail = {"key": "T-1", "fields": dict(
             self._fields(), project={"name": "P", "key": "T"})}
         monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
-                            lambda cfg, project=None: {"story_points": None, "sprint": None})
+                            lambda cfg, project=None: {"story_points": None, "sprint": None, "epic_link": None})
         mock_get = MagicMock(side_effect=[detail, {"comments": [], "total": 0}])
         monkeypatch.setattr("jira_cli.commands.jira_get", mock_get)
         cmd_issue({"url": "https://jira.x", "user": "u", "pass": "p"}, "T-1")
@@ -2644,10 +2652,13 @@ class TestFieldIdCache:
     CFG = {"url": "https://jira.example.com", "user": "u", "pass": "p"}
 
     FIELD_LIST = [
-        {"id": "customfield_10016", "name": "Story Points"},
+        {"id": "customfield_10016", "name": "Original Story Points"},
         {"id": "customfield_10020", "name": "Sprint"},
+        {"id": "customfield_10021", "name": "Epic Link"},
         {"id": "summary", "name": "Summary"},
     ]
+    EXPECTED_IDS = {"story_points": "customfield_10016", "sprint": "customfield_10020",
+                    "epic_link": "customfield_10021"}
 
     def _isolate(self, monkeypatch, tmp_path):
         from jira_cli import fields as _fields_mod
@@ -2666,7 +2677,7 @@ class TestFieldIdCache:
 
         monkeypatch.setattr("jira_cli.http.jira_get", fake_get)
         ids = mod.get_custom_field_ids(self.CFG, "BANKING")
-        assert ids == {"story_points": "customfield_10016", "sprint": "customfield_10020"}
+        assert ids == self.EXPECTED_IDS
         assert seen == [(self.CFG, "field")]
 
         # Second call: memory cache, no new fetch.
@@ -2730,7 +2741,7 @@ class TestFieldIdCache:
         monkeypatch.setattr("jira_cli.http.jira_get", boom)
         mod._reset_field_cache()
         ids = mod.get_custom_field_ids(self.CFG, "P")
-        assert ids == {"story_points": "customfield_10016", "sprint": "customfield_10020"}
+        assert ids == self.EXPECTED_IDS
 
     def test_exact_ids_preferred_over_shape(self, monkeypatch, tmp_path):
         mod = self._isolate(monkeypatch, tmp_path)
@@ -2749,3 +2760,189 @@ class TestFieldIdCache:
         agile = mod.extract_agile_fields(fields, self.CFG, "P")
         assert agile["story_points"] == 8
         assert agile["sprint"] == ["Gamma (ACTIVE)"]
+
+@pytest.mark.real_field_cache
+class TestPlannerSupport:
+    """F1-F7 mock tests: SP regression, sprint parsing, paging, changelog, moves."""
+
+    CFG = {"url": "https://tribe.jibit.cloud", "user": "u", "pass": "p"}
+    SPRINT_RAW = (
+        "com.atlassian.greenhopper.service.sprint.Sprint@1"
+        "[id=547,name=IPG Sprint 66,state=ACTIVE,startDate=2026-09-01T00:00:00.000,"
+        "endDate=2026-10-15T00:00:00.000,completeDate=<null>,goal=]"
+    )
+
+    def _isolate(self, monkeypatch, tmp_path):
+        from jira_cli import fields as mod
+        monkeypatch.setenv("JIRA_CLI_FIELD_CACHE_DIR", str(tmp_path / "fc"))
+        mod._reset_field_cache()
+        return mod
+
+    def _field_list(self):
+        return [
+            {"id": "customfield_10104", "name": "Original story points"},
+            {"id": "customfield_10108", "name": "Sprint"},
+            {"id": "customfield_10109", "name": "Epic Link"},
+        ]
+
+    def test_sp_regression_original_story_points(self, monkeypatch, tmp_path):
+        """cf_10104=3.0 named 'Original story points' -> story_points 3.0 (was null)."""
+        mod = self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setattr("jira_cli.http.jira_get", lambda c, p, params=None: self._field_list())
+        ids = mod.get_custom_field_ids(self.CFG, "IPG")
+        assert ids["story_points"] == "customfield_10104"
+        agile = mod.extract_agile_fields({"customfield_10104": 3.0}, self.CFG, "IPG")
+        assert agile["story_points"] == 3.0
+
+    def test_sprint_string_parsing(self):
+        from jira_cli.fields import parse_sprints, parse_sprint_value
+        out = parse_sprints([self.SPRINT_RAW])
+        assert out == [{"id": 547, "name": "IPG Sprint 66", "state": "ACTIVE",
+                        "start": "2026-09-01T00:00:00.000",
+                        "end": "2026-10-15T00:00:00.000"}]
+        assert parse_sprint_value([self.SPRINT_RAW]) == ["IPG Sprint 66 (ACTIVE)"]
+        cloud = parse_sprints([{"id": 9, "name": "S1", "state": "closed",
+                                "startDate": "2024-01-01", "endDate": "2024-01-15"}])
+        assert cloud[0]["state"] == "closed"
+
+    def test_search_pagination_envelope(self, monkeypatch, capsys, tmp_path):
+        from jira_cli.commands import cmd_search
+        self._isolate(monkeypatch, tmp_path)
+        pages = [
+            {"issues": [{"key": f"IPG-{i}", "fields": {"summary": "s"}} for i in (1, 2)],
+             "total": 3, "maxResults": 2},
+            {"issues": [{"key": "IPG-3", "fields": {"summary": "s"}}], "total": 3, "maxResults": 2},
+        ]
+        calls = {"n": 0}
+        def fake_search(cfg, path, params=None):
+            assert path == "search"
+            page = pages[calls["n"]]
+            calls["n"] += 1
+            return page
+        def fake_field(cfg, path, params=None):
+            return list(self._field_list())
+        monkeypatch.setattr("jira_cli.commands.jira_get", fake_search)
+        monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
+                            lambda cfg, project=None: {"story_points": "customfield_10104",
+                                                      "sprint": "customfield_10108",
+                                                      "epic_link": "customfield_10109"})
+        out = cmd_search(self.CFG, "project=IPG", limit=2, fmt="json",
+                         fetch_all=True, max_results=1000, envelope=True)
+        assert out["total"] == 3 and out["returned"] == 3
+        assert [i["key"] for i in out["issues"]] == ["IPG-1", "IPG-2", "IPG-3"]
+        assert out["next_start_at"] is None
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["total"] == 3
+        # Persian text survives ensure_ascii=False
+        assert "\\u" not in capsys.readouterr().out
+
+    def test_search_persian_not_escaped(self, monkeypatch, capsys, tmp_path):
+        from jira_cli.commands import cmd_search
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setattr("jira_cli.commands.jira_get", MagicMock(return_value={
+            "issues": [{"key": "IPG-1", "fields": {"summary": "رفع باگ ورود"}}], "total": 1}))
+        monkeypatch.setattr("jira_cli.fields.get_custom_field_ids",
+                            lambda cfg, project=None: {"story_points": "customfield_10104",
+                                                      "sprint": "customfield_10108",
+                                                      "epic_link": "customfield_10109"})
+        cmd_search(self.CFG, "project=IPG", fmt="json")
+        assert "رفع باگ ورود" in capsys.readouterr().out
+
+    def test_changelog_filtering_and_backfill(self, monkeypatch):
+        from jira_cli.changelog import normalize_histories, iter_full_histories
+        histories = [
+            {"created": "2026-10-01T10:00:00.000+0000",
+             "author": {"name": "jdoe", "displayName": "John Doe"},
+             "items": [
+                 {"field": "status", "fromString": "To Do", "toString": "In Progress"},
+                 {"field": "assignee", "from": "a", "fromString": "Ann",
+                  "to": "jdoe", "toString": "John Doe"},
+                 {"field": "summary", "fromString": "x", "toString": "y"}]},
+        ]
+        entries = normalize_histories(histories, ["assignee", "status", "sprint"])
+        assert [(e["field"], e["from"], e["to"]) for e in entries] == [
+            ("status", "To Do", "In Progress"),
+            ("assignee", "a (Ann)", "jdoe (John Doe)"),
+        ]
+        # truncated inline histories backfilled via issue/K/changelog
+        block = {"histories": histories[:1], "total": 2, "maxResults": 1}
+        extra = {"histories": [{"created": "2026-10-02T00:00:00.000+0000",
+                                "author": "bot", "items": []}], "total": 2}
+        calls = []
+        def fake_get(cfg, path, params=None):
+            calls.append((path, params))
+            return extra
+        full = list(iter_full_histories(self.CFG, "IPG-1", block, fake_get))
+        assert len(full) == 2
+        assert calls[0][0] == "issue/IPG-1/changelog"
+
+    def test_move_writes_journal_before_first_write(self, monkeypatch, tmp_path):
+        from jira_cli import agile as A
+        journal = str(tmp_path / "j.json")
+        events = []
+        monkeypatch.setattr("jira_cli.agile.jira_get",
+                            lambda c, p, params=None: {"key": "IPG-1", "fields": {}})
+        orig_write = A._write_journal
+        def spy_write(path, payload):
+            events.append("journal")
+            return orig_write(path, payload)
+        monkeypatch.setattr(A, "_write_journal", spy_write)
+        membership = {"now": [547]}
+        monkeypatch.setattr(A, "_current_sprint_ids", lambda c, k, sid=None: list(membership["now"]))
+        def spy_post_and_flip(cfg, path, data):
+            events.append(("post", path))
+            assert events[0] == "journal", "write happened before journal!"
+            membership["now"] = [548]
+            return {}
+        monkeypatch.setattr(A, "agile_post", spy_post_and_flip)
+        A.cmd_sprint_move(self.CFG, "548", ["IPG-1"], journal=journal, yes=True)
+        assert events[0] == "journal"
+        assert ("post", "sprint/548/issue") in events
+        saved = json.loads(open(journal, encoding="utf-8").read())
+        assert saved["items"][0] == {"key": "IPG-1", "from_sprint_ids": [547], "to": "548"}
+        import stat
+        assert stat.S_IMODE(os.stat(journal).st_mode) == 0o600
+
+    def test_dry_run_makes_zero_writes(self, monkeypatch, tmp_path):
+        from jira_cli import agile as A
+        posts = []
+        monkeypatch.setattr("jira_cli.agile.jira_get",
+                            lambda c, p, params=None: {"key": "IPG-1", "fields": {}})
+        monkeypatch.setattr(A, "agile_post",
+                            lambda c, p, d: posts.append((p, d)) or {})
+        monkeypatch.setattr(A, "_current_sprint_ids", lambda c, k, sid=None: [547])
+        A.cmd_sprint_move(self.CFG, "548", ["IPG-1"],
+                          journal=str(tmp_path / "j.json"), dry_run=True)
+        A.cmd_backlog_move(self.CFG, ["IPG-1"],
+                           journal=str(tmp_path / "j2.json"), dry_run=True)
+        assert posts == []
+
+    def test_verify_mismatch_exits_nonzero(self, monkeypatch, tmp_path):
+        from jira_cli import agile as A
+        monkeypatch.setattr("jira_cli.agile.jira_get",
+                            lambda c, p, params=None: {"key": "IPG-1", "fields": {}})
+        monkeypatch.setattr(A, "agile_post", lambda c, p, d: {})
+        monkeypatch.setattr(A, "_current_sprint_ids", lambda c, k, sid=None: [])
+        with pytest.raises(SystemExit) as e:
+            A.cmd_sprint_move(self.CFG, "548", ["IPG-1"],
+                              journal=str(tmp_path / "j.json"), yes=True)
+        assert e.value.code != 0
+
+    def test_restore_round_trip(self, monkeypatch, tmp_path):
+        from jira_cli import agile as A
+        journal = tmp_path / "move.json"
+        journal.write_text(json.dumps({"created_at": "t", "user": "u",
+                                       "base_url": "b", "action": "sprint.move",
+                                       "items": [{"key": "IPG-1", "from_sprint_ids": [547],
+                                                  "to": "548"}]}))
+        posts = []
+        monkeypatch.setattr("jira_cli.agile.jira_get",
+                            lambda c, p, params=None: {"key": "IPG-1", "fields": {}})
+        monkeypatch.setattr(A, "agile_get",
+                            lambda c, p, params=None: {"id": 547, "name": "S",
+                                                      "state": "ACTIVE"})
+        monkeypatch.setattr(A, "agile_post", lambda c, p, d: posts.append(p) or {})
+        # membership flips to the destination after the write
+        monkeypatch.setattr(A, "_current_sprint_ids", lambda c, k, sid=None: [547])
+        A.cmd_sprint_restore(self.CFG, str(journal), yes=True)
+        assert "sprint/547/issue" in posts

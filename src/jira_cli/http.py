@@ -305,6 +305,37 @@ def jira_get(cfg, path, params=None):
     return _request(cfg, "GET", path, params=params)
 
 
+def _agile_request(cfg, method, path, data=None, params=None):
+    """Request against ``/rest/agile/1.0/`` (same Basic auth; Server + Cloud).
+
+    Kept separate from :func:`_request` because agile paths live outside
+    ``/rest/api/N/``. The agile base path is fixed on both flavors.
+    """
+    url = f"{cfg['url']}/rest/agile/1.0/{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params, doseq=True)
+    body = json.dumps(data).encode("utf-8") if data is not None else None
+    req = urllib.request.Request(url, data=body, headers=auth_header(cfg), method=method)
+    req.add_header("Accept", "application/json")
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    return _send(req)
+
+
+def agile_get(cfg, path, params=None):
+    """GET request to the Jira Agile REST API (``/rest/agile/1.0/``)."""
+    return _agile_request(cfg, "GET", path, params=params)
+
+
+def agile_post(cfg, path, data):
+    """POST JSON data to the Jira Agile REST API (``/rest/agile/1.0/``).
+
+    Used by sprint/backlog membership moves. If the server answers 405, the
+    error envelope (``ERROR 405 ...`` + exit 1) carries the method+path.
+    """
+    return _agile_request(cfg, "POST", path, data=data)
+
+
 def jira_post(cfg, path, data):
     """POST JSON data to Jira REST API (v2 on Server/DC, v3 on Cloud)."""
     return _request(cfg, "POST", path, data=data)

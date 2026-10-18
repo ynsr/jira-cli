@@ -96,6 +96,10 @@ def _agile_json_fields(fields, cfg=None, project=None):
         out["story_points"] = agile["story_points"]
     if agile["sprint"]:
         out["sprint"] = agile["sprint"]
+    if agile["sprints"]:
+        out["sprints"] = agile["sprints"]
+    if agile["epic_key"] is not None:
+        out["epic_key"] = agile["epic_key"]
     return out
 
 
@@ -111,27 +115,86 @@ def _agile_table_suffix(agile):
     return " | ".join(parts)
 
 
-def cmd_search(cfg, jql, limit=20, fmt="table"):
-    """Search issues with JQL. fmt: table|json."""
-    params = {
-        "jql": jql,
-        "maxResults": limit,
-        "fields": "summary,status,priority,assignee,created,updated,issuetype,reporter,resolution,*navigable",
-    }
-    data = jira_get(cfg, "search", params)
-    issues = data.get("issues", [])
-    total = data.get("total", 0)
+def _search_pages(cfg, jql, start_at=0, limit=20, fetch_all=False,
+                  max_results=1000, fields=None, expand=None):
+    """Yield ``(issues, total)`` pages from ``GET search`` (auto-paginate with --all).
+
+    Single page: ``startAt=start_at, maxResults=limit``. With ``fetch_all``,
+    pages use the server page size (first response's ``maxResults``, fallback
+    50) and stop at ``total`` or ``max_results``. Returns first-page total.
+    """
+    base_fields = ("summary,status,priority,assignee,created,updated,"
+                   "issuetype,reporter,resolution,*navigable")
+    page_size = limit
+    start = max(0, start_at)
+    collected = []
+    total = 0
+    first = True
+    while True:
+        params = {"jql": jql, "startAt": start, "maxResults": page_size,
+                  "fields": fields or base_fields}
+        if expand:
+            params["expand"] = ",".join(expand)
+        data = jira_get(cfg, "search", params)
+        batch = data.get("issues", [])
+        total = data.get("total", 0)
+        collected.extend(batch)
+        if not fetch_all:
+            return collected, total
+        if first:
+            first = False
+            try:
+                page_size = max(1, int(data.get("maxResults") or 50))
+            except (TypeError, ValueError):
+                page_size = 50
+            page_size = min(page_size, max(1, max_results))
+        start += len(batch)
+        if not batch or start >= total or len(collected) >= max_results:
+            return collected[:max_results], total
+
+
+def cmd_search(cfg, jql, limit=20, fmt="table", start_at=0, fetch_all=False,
+               max_results=1000, fields=None, expand=None, envelope=False,
+               changelog_fields=None):
+    """Search issues with JQL. fmt: table|json.
+
+    ``fetch_all`` auto-paginates (capped by ``max_results``); ``envelope``
+    wraps JSON as ``{total,start_at,returned,next_start_at,issues}``.
+    ``changelog_fields`` attaches filtered ``changelog`` entries per issue
+    (requires ``changelog`` in ``expand``); truncated inline histories are
+    backfilled via ``GET issue/K/changelog``.
+    """
+    from jira_cli.changelog import (iter_full_histories, normalize_histories,
+                                    parse_changelog_fields_arg)
+
+    issues, total = _search_pages(cfg, jql, start_at, limit, fetch_all,
+                                  max_results, fields, expand)
+    want_changelog = expand and "changelog" in [e.strip().lower() for e in expand]
+    clog_wanted = parse_changelog_fields_arg(changelog_fields) if want_changelog else None
+    proj = _project_for_field_cache(jql=jql, issues=issues)
+    for iss in issues:
+        iss.setdefault("fields", {}).update(
+            _agile_json_fields(iss.get("fields", {}), cfg, proj))
+        if want_changelog and clog_wanted is not None:
+            block = iss.get("changelog") or {}
+            histories = list(iter_full_histories(cfg, iss.get("key", ""), block, jira_get))
+            iss["changelog"] = normalize_histories(histories, clog_wanted)
 
     if fmt == "json":
-        proj = _project_for_field_cache(jql=jql, issues=issues)
-        for iss in issues:
-            iss.setdefault("fields", {}).update(
-                _agile_json_fields(iss.get("fields", {}), cfg, proj))
-        print(json.dumps(issues, indent=2))
-        return
+        if envelope:
+            returned = len(issues)
+            nxt = start_at + returned
+            payload = {"total": total, "start_at": start_at,
+                       "returned": returned,
+                       "next_start_at": nxt if nxt < total else None,
+                       "issues": issues}
+        else:
+            payload = issues
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return payload if envelope else issues
     if not issues:
         print("No issues found.")
-        return
+        return []
 
     print(f"\n\033[1mQuery:\033[0m {jql}")
     print(f"\033[1mTotal: {total} issues (showing {len(issues)})\033[0m\n")
@@ -183,6 +246,8 @@ def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
             "resolution": agile["resolution"],
             "story_points": agile["story_points"],
             "sprint": agile["sprint"],
+            "sprints": agile["sprints"],
+            "epic_key": agile["epic_key"],
             "comments": [
                 {
                     "id": c.get("id", ""),
@@ -196,7 +261,7 @@ def cmd_issue(cfg, issue_key, fmt="table", include_raw=False):
         }
         if include_raw:
             out["raw"] = data
-        print(json.dumps(out, indent=2))
+        print(json.dumps(out, indent=2, ensure_ascii=False))
         return
 
     print(f"\n\033[1m{'='*60}\033[0m")
@@ -260,7 +325,7 @@ def cmd_issue_comments(cfg, issue_key, limit=5, page=1, desc=False, fmt="table")
     total = data.get("total", 0)
 
     if fmt == "json":
-        print(json.dumps(comments, indent=2))
+        print(json.dumps(comments, indent=2, ensure_ascii=False))
         return
     if not comments:
         print("No comments found.")
@@ -282,6 +347,40 @@ def cmd_issue_comments(cfg, issue_key, limit=5, page=1, desc=False, fmt="table")
         print()
 
 
+def cmd_issue_changelog(cfg, issue_key, changelog_fields=None, since=None, fmt="table"):
+    """Normalized changelog entries for an issue: ``[{at,author,field,from,to}]``.
+
+    Fetches ``GET issue/K?expand=changelog`` (inline histories) and backfills
+    truncated pages via ``GET issue/K/changelog``. ``since`` filters by date
+    (``YYYY-MM-DD`` prefix or full timestamp). Table mode prints one line per
+    entry; JSON prints the entry list.
+    """
+    from jira_cli.changelog import (iter_full_histories, normalize_histories,
+                                    parse_changelog_fields_arg, _parse_since)
+
+    wanted = parse_changelog_fields_arg(changelog_fields)
+    since_cmp = _parse_since(since) if since else ""
+    if since and not since_cmp:
+        print(f"Error: invalid --since date: {since!r} (use YYYY-MM-DD).", file=sys.stderr)
+        sys.exit(2)
+    data = jira_get(cfg, f"issue/{issue_key}", {"expand": "changelog"})
+    block = data.get("changelog") or {}
+    histories = list(iter_full_histories(cfg, issue_key, block, jira_get))
+    entries = normalize_histories(histories, wanted, since_cmp or None)
+    if fmt == "json":
+        print(json.dumps(entries, indent=2, ensure_ascii=False))
+        return entries
+    if not entries:
+        print(f"No changelog entries for {issue_key}.")
+        return []
+    print(f"\n\033[1mChangelog for {issue_key}\033[0m ({len(entries)} entries)")
+    print()
+    for e in entries:
+        print(f"  \033[38;5;244m{e['at'][:10]} {e['author']}\033[0m  {e['field']}: {e['from']!r} \u2192 {e['to']!r}")
+    print()
+    return entries
+
+
 def cmd_issue_comment(cfg, issue_key, comment_id, fmt="table"):
     """Show full detail for a single comment."""
     data = jira_get(cfg, f"issue/{issue_key}/comment/{comment_id}")
@@ -291,7 +390,7 @@ def cmd_issue_comment(cfg, issue_key, comment_id, fmt="table"):
     body = extract_adf_text(data.get("body", "")) or ""
 
     if fmt == "json":
-        print(json.dumps(data, indent=2))
+        print(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     print(f"\n\033[1mComment #{data.get('id', '')} on {issue_key}\033[0m")
@@ -392,7 +491,7 @@ def cmd_create_issue(cfg, project, summary, issue_type="Task", description=None,
     data = jira_post(cfg, "issue", {"fields": fields})
     key = data.get("key", "?")
     if fmt == "json":
-        print(json.dumps(data, indent=2))
+        print(json.dumps(data, indent=2, ensure_ascii=False))
         return data
     print(f"\n\033[1mCreated \033[0m\033[1m{key}\033[0m")
     print(f"  {cfg['url']}/browse/{key}")
@@ -492,7 +591,7 @@ def cmd_issue_attachments(cfg, issue_key, fmt="table"):
         return []
 
     if fmt == "json":
-        print(json.dumps(attachments, indent=2))
+        print(json.dumps(attachments, indent=2, ensure_ascii=False))
         return attachments
 
     print(f"\n\033[1mAttachments for {issue_key}\033[0m ({len(attachments)})")

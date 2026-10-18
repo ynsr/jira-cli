@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-10-18T07:15:56",
+  "user": "u",
+  "base_url": "https://tribe.jibit.cloud",
+  "action": "sprint.restore->547",
+  "items": [
+    {
+      "key": "IPG-1",
+      "from_sprint_ids": [
+        547
+      ],
+      "to": "547"
+    }
+  ]
+}

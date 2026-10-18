@@ -12,6 +12,7 @@ from jira_cli.commands import (
     cmd_issue,
     cmd_issue_comments,
     cmd_issue_comment,
+    cmd_issue_changelog,
     cmd_issue_add_comment,
     cmd_setup,
     cmd_issue_update_status,
@@ -76,7 +77,8 @@ def _dispatch():
     cfg = load_config()
 
     # Config check — skip for setup and help
-    needs_config = {"projects", "search", "issue", "create", "link"}
+    needs_config = {"projects", "search", "issue", "create", "link", "board",
+                    "sprint", "backlog", "permissions", "capabilities", "version"}
     cmd = sys.argv[1] if len(sys.argv) > 1 else None
     if cmd not in ("setup", "help", "completion", "completion-install", None):
         if not cfg.get("url") or not cfg.get("user") or not cfg.get("pass"):
@@ -160,7 +162,14 @@ def _dispatch():
         if not jql:
             print_help("search")
             sys.exit(1)
-        return cmd_search(cfg, jql, flags["limit"], flags["format"])
+        return cmd_search(cfg, jql, flags["limit"], flags["format"],
+                          start_at=flags.get("start_at", 0),
+                          fetch_all=flags.get("all", False),
+                          max_results=flags.get("max_results", 1000),
+                          fields=flags.get("fields"),
+                          expand=flags.get("expand") or None,
+                          envelope=flags.get("envelope", False),
+                          changelog_fields=flags.get("changelog_fields"))
 
     # --- create ---
     if cmd == "create":
@@ -230,6 +239,15 @@ def _dispatch():
                 limit=flags["limit"],
                 page=flags["page"],
                 desc=flags["desc"],
+                fmt=flags["format"],
+            )
+
+        # issue <key> changelog
+        if sub == "changelog":
+            return cmd_issue_changelog(
+                cfg, issue_key,
+                changelog_fields=flags.get("changelog_fields"),
+                since=flags.get("since"),
                 fmt=flags["format"],
             )
 
@@ -308,8 +326,132 @@ def _dispatch():
             )
 
         print(f"Unknown issue subcommand: {sub}", file=sys.stderr)
-        print("Subcommands: comments, comment <id>, add-comment, attachments, download, delete-attachment, attach, update, transition, edit-comment", file=sys.stderr)
+        print("Subcommands: comments, comment <id>, add-comment, attachments, download, delete-attachment, attach, update, transition, edit-comment, changelog", file=sys.stderr)
         sys.exit(1)
+
+    # --- board ---
+    if cmd == "board":
+        if has_help_flag(args) or not args:
+            print_help("board")
+            return
+        rest, flags = parse_flags(args)
+        if not rest or rest[0] != "list":
+            print("Usage: jira-cli board list [--project KEY] [--format json]", file=sys.stderr)
+            sys.exit(1)
+        from jira_cli.agile import cmd_board_list
+        return cmd_board_list(cfg, project=flags.get("project"), fmt=flags["format"])
+
+    # --- sprint ---
+    if cmd == "sprint":
+        if has_help_flag(args) or not args:
+            print_help("sprint")
+            return
+        sub = args[0]
+        rest, flags = parse_flags(args[1:])
+        from jira_cli.agile import (cmd_sprint_list, cmd_sprint_get,
+                                    cmd_sprint_issues, cmd_sprint_current,
+                                    cmd_sprint_move, cmd_sprint_restore)
+        if sub == "list":
+            if not flags.get("board"):
+                print("Usage: jira-cli sprint list --board ID [--state active,future,closed] [--last N] [--format json]",
+                      file=sys.stderr)
+                sys.exit(1)
+            return cmd_sprint_list(cfg, flags["board"], state=flags.get("state"),
+                                   last=flags.get("last"), fmt=flags["format"])
+        if sub == "get":
+            if not rest:
+                print("Usage: jira-cli sprint get ID [--format json]", file=sys.stderr)
+                sys.exit(1)
+            return cmd_sprint_get(cfg, rest[0], fmt=flags["format"])
+        if sub == "issues":
+            if not rest:
+                print("Usage: jira-cli sprint issues ID [--fields a,b] [--all] [--format json]",
+                      file=sys.stderr)
+                sys.exit(1)
+            return cmd_sprint_issues(cfg, rest[0], fields=flags.get("fields"),
+                                     fetch_all=flags.get("all", False),
+                                     max_results=flags.get("max_results", 1000),
+                                     fmt=flags["format"])
+        if sub == "current":
+            if not flags.get("board"):
+                print("Usage: jira-cli sprint current --board ID [--format json]", file=sys.stderr)
+                sys.exit(1)
+            return cmd_sprint_current(cfg, flags["board"], fmt=flags["format"])
+        if sub == "move":
+            sprint_id = flags.get("sprint")
+            keys = [k for k in rest if "-" in k]
+            if not sprint_id or not keys:
+                print("Usage: jira-cli sprint move --sprint ID K1 K2 ... [--dry-run] [--yes] [--journal PATH]",
+                      file=sys.stderr)
+                sys.exit(1)
+            return cmd_sprint_move(cfg, sprint_id, keys, journal=flags.get("journal"),
+                                   yes=flags.get("yes", False), dry_run=flags.get("dry_run", False))
+        if sub == "restore":
+            journal = flags.get("journal") or (rest[0] if rest else None)
+            if not journal:
+                print("Usage: jira-cli sprint restore --journal FILE [--dry-run] [--yes]",
+                      file=sys.stderr)
+                sys.exit(1)
+            return cmd_sprint_restore(cfg, journal, yes=flags.get("yes", False),
+                                      dry_run=flags.get("dry_run", False))
+        print(f"Unknown sprint subcommand: {sub}", file=sys.stderr)
+        print("Subcommands: list, get, issues, current, move, restore", file=sys.stderr)
+        sys.exit(1)
+
+    # --- backlog ---
+    if cmd == "backlog":
+        if has_help_flag(args) or not args:
+            print_help("backlog")
+            return
+        if args[0] != "move":
+            print("Usage: jira-cli backlog move K1 K2 ... [--dry-run] [--yes] [--journal PATH]",
+                  file=sys.stderr)
+            sys.exit(1)
+        rest, flags = parse_flags(args[1:])
+        keys = [k for k in rest if "-" in k]
+        if not keys:
+            print("Usage: jira-cli backlog move K1 K2 ... [--dry-run] [--yes] [--journal PATH]",
+                  file=sys.stderr)
+            sys.exit(1)
+        from jira_cli.agile import cmd_backlog_move
+        return cmd_backlog_move(cfg, keys, journal=flags.get("journal"),
+                                yes=flags.get("yes", False), dry_run=flags.get("dry_run", False))
+
+    # --- permissions ---
+    if cmd == "permissions":
+        if has_help_flag(args):
+            print_help("permissions")
+            return
+        rest, flags = parse_flags(args)
+        if not flags.get("project"):
+            print("Usage: jira-cli permissions --project KEY [--check A,B] [--format json]",
+                  file=sys.stderr)
+            sys.exit(1)
+        from jira_cli.agile import cmd_permissions
+        return cmd_permissions(cfg, flags["project"], check=flags.get("check") or (),
+                               fmt=flags["format"])
+
+    # --- version (alias for --version; --json gives capabilities) ---
+    if cmd == "version":
+        if has_help_flag(args):
+            print_help("main")
+            return
+        rest, flags = parse_flags(args)
+        if flags["format"] == "json":
+            from jira_cli.agile import cmd_capabilities
+            return cmd_capabilities(cfg, project=flags.get("project"), fmt="json")
+        from jira_cli import __version__
+        print(f"jira-cli {__version__}")
+        return
+
+    # --- capabilities ---
+    if cmd == "capabilities":
+        if has_help_flag(args):
+            print_help("capabilities")
+            return
+        rest, flags = parse_flags(args)
+        from jira_cli.agile import cmd_capabilities
+        return cmd_capabilities(cfg, project=flags.get("project"), fmt=flags["format"])
 
     # --- unknown ---
     print(f"Unknown: {cmd}", file=sys.stderr)

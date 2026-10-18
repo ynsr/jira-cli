@@ -13,21 +13,35 @@ _COMPLETION_COMMANDS = [
     "create",
     "link",
     "issue",
+    "board",
+    "sprint",
+    "backlog",
+    "permissions",
+    "capabilities",
+    "version",
     "setup",
     "help",
     "completion",
 ]
 
 _COMPLETION_SUBCOMMANDS = {
-    "issue": ["comments", "comment", "add-comment", "attachments", "download", "delete-attachment", "attach", "update", "transition", "edit-comment"],
+    "issue": ["comments", "comment", "add-comment", "attachments", "download", "delete-attachment", "attach", "update", "transition", "edit-comment", "changelog"],
+    "board": ["list"],
+    "sprint": ["list", "get", "issues", "current", "move", "restore"],
+    "backlog": ["move"],
     "completion": ["bash", "zsh", "fish", "install"],
 }
 
 _COMPLETION_FLAGS = {
-    "search": ["--limit", "--saved", "--list-filters", "--format"],
-    "issue": ["--limit", "--page", "--desc", "--format", "--body"],
+    "search": ["--limit", "--saved", "--list-filters", "--format", "--start-at", "--max-results", "--all", "--fields", "--expand", "--envelope", "--changelog-fields"],
+    "issue": ["--limit", "--page", "--desc", "--format", "--body", "--changelog-fields", "--since"],
     "create": ["--project", "--summary", "--type", "--description", "--priority", "--assignee", "--format"],
     "link": ["--type", "--comment"],
+    "board": ["--project", "--format"],
+    "sprint": ["--board", "--state", "--last", "--sprint", "--journal", "--fields", "--all", "--format", "--yes", "--dry-run"],
+    "backlog": ["--journal", "--yes", "--dry-run"],
+    "permissions": ["--project", "--check", "--format"],
+    "capabilities": ["--project", "--format"],
     "issue-update": ["--summary", "--description", "--priority", "--assignee"],
     "issue-transition": [],
     "issue-edit-comment": ["--body"],

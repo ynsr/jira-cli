@@ -1,3 +1,3 @@
 """jira-cli — Query, list, and interact with Jira issues from the terminal."""
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
