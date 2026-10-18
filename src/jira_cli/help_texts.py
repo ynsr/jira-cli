@@ -22,6 +22,13 @@ COMMANDS:
   issue <KEY> update          Update summary/description/priority/assignee
   issue <KEY> transition <ID>     Transition issue to a new status
   issue <KEY> edit-comment <ID>   Edit an existing comment body
+  issue <KEY> changelog       Normalized change history (--changelog-fields, --since)
+  board list                  List agile boards (--project)
+  sprint list|get|issues|current  Read sprints for a board
+  sprint move|restore         Move issues into a sprint / restore from a journal
+  backlog move K...           Move issues to the backlog (journaled, verified)
+  permissions                 Check project permissions (--check)
+  capabilities                Server flavor/version, features, resolved field IDs
   setup                       Configure credentials
   completion <shell>          Print a shell completion script (bash, zsh, fish)
   completion-install [shell]  Install the completion eval line into your rc file
@@ -101,11 +108,19 @@ Args:
   <jql>               Raw JQL query (required unless --saved is used)
   --saved <filter>    AND-join a predefined filter (repeatable, comma-separated)
   --list-filters      List all saved filters and exit
-  --limit <N>         Max results (default: 20)
+  --limit <N>         Page size (default: 20)
+  --start-at <N>      First result offset (default: 0)
+  --max-results <N>   Cap on total collected results (default: 1000)
+  --all               Walk every page until total (fetch_all)
+  --fields <a,b>      JQL fields to fetch (default: curated navigable set)
+  --expand <x,y>      Passed to the API (changelog auto-enables inline history)
+  --envelope          Wrap output as {total,start_at,returned,next_start_at,issues}
+  --changelog-fields <a,b>  Attach normalized per-issue changelog (summary/comment/sprint are noisy — excluded by default; use --expand changelog for full text)
   --format <fmt>      Output: table (default) or json
 
 Output: table rows show summary + a Resolution/SP/Sprint suffix when present;
-  json payloads add curated "resolution", "story_points", "sprint" keys.
+  json payloads add curated resolution, story_points, sprint (legacy string),
+  sprints (structured list), and epic_key keys.
 
 Available --saved filters:
 """ + "\n".join(f"  {n:20} {v['desc']}" for n, v in sorted(FILTERS.items())) + """
@@ -130,6 +145,7 @@ Usage:
   jira-cli issue <KEY> delete-attachment <id>... [--all]  Delete attachment file(s)
   jira-cli issue <KEY> attach <file> [<file>...]    Upload attachment file(s)
   jira-cli issue <KEY> update [flags]               Update fields (summary/description/priority/assignee)
+  jira-cli issue <KEY> changelog [--changelog-fields a,b] [--since <when>]  Normalized change history
   jira-cli issue <KEY> -h                      This help text
 
 Flags for 'issue <KEY>' detail view:
@@ -138,7 +154,12 @@ Flags for 'issue <KEY>' detail view:
   --include-raw       With json output: add "raw" key holding the untouched Jira payload
 
 Detail views always include Resolution, Story Points, and Sprint when set
-(json keys: "resolution", "story_points", "sprint").
+(json keys: resolution, story_points, sprint plus sprints and epic_key).
+
+Flags for 'changelog' subcommand:
+  --changelog-fields <a,b>  Only these normalized fields (status, assignee, Sprint, ...)
+  --since <when>      Only entries at/after this time (absolute datetime or '7d'/'24h'/'30m')
+  --format <fmt>      table (default) or json
 
 Flags for 'comments' subcommand:
   --limit <N>         Comments per page (default: 5)
@@ -229,6 +250,84 @@ COMPATIBILITY:
 
 EXAMPLE:
   jira-cli setup
+"""
+
+HELP["board"] = """jira-cli board — list agile boards
+
+Usage:
+  jira-cli board list [--project KEY] [--format <table|json>]
+
+EXAMPLES:
+  jira-cli board list
+  jira-cli board list --project IPG --format json
+"""
+
+HELP["sprint"] = """jira-cli sprint — read and move sprints
+
+Usage:
+  jira-cli sprint list --board ID [--state active,future,closed] [--last N] [--format <table|json>]
+  jira-cli sprint get ID [--format <table|json>]
+  jira-cli sprint issues ID [--fields a,b] [--all] [--format <table|json>]
+  jira-cli sprint current --board ID [--format <table|json>]
+  jira-cli sprint move --sprint ID K1 K2 ... [--dry-run] [--yes] [--journal PATH]
+  jira-cli sprint restore --journal FILE [--dry-run] [--yes]
+
+Sprint objects: {id, name, state, start, end, complete, board}.
+'sprint list --last N' needs --state closed: the API returns oldest first,
+so all closed pages are read and the tail by (completeDate, endDate, id) kept.
+'current' prints the active sprint, else the earliest future sprint (exit 1 if none).
+
+Moves write a journal file BEFORE any write call (0600), move in chunks of 50
+via POST sprint/{id}/issue (unverified live — a 405 names method+path), then
+re-read each issue and VERIFY membership. 'restore' replays a journal grouped
+by recorded origin sprint; closed destinations are refused (exit 1).
+
+EXAMPLES:
+  jira-cli sprint list --board 3 --state active,future
+  jira-cli sprint list --board 3 --state closed --last 3 --format json
+  jira-cli sprint current --board 3
+  jira-cli sprint move --sprint 548 IPG-1 IPG-2 --dry-run
+  jira-cli sprint restore --journal ./jira-cli-sprint.move-20261018-120000.json --yes
+"""
+
+HELP["backlog"] = """jira-cli backlog — move issues to the backlog
+
+Usage:
+  jira-cli backlog move K1 K2 ... [--dry-run] [--yes] [--journal PATH]
+
+Same journal-before-write / chunks-of-50 / re-read-and-VERIFY contract as
+'sprint move', via POST backlog/issue (unverified live).
+
+EXAMPLES:
+  jira-cli backlog move IPG-1 IPG-2 --dry-run
+  jira-cli backlog move IPG-1 --yes --journal ./backlog.json
+"""
+
+HELP["permissions"] = """jira-cli permissions — check project permissions
+
+Usage:
+  jira-cli permissions --project KEY [--check A,B] [--format <table|json>]
+
+Reads GET /rest/api/2/mypermissions. --check names are always present in
+json output (false when absent).
+
+EXAMPLES:
+  jira-cli permissions --project IPG
+  jira-cli permissions --project IPG --check MOVE_ISSUES,EDIT_ISSUES --format json
+"""
+
+HELP["capabilities"] = """jira-cli capabilities — describe this CLI + server
+
+Usage:
+  jira-cli capabilities [--project KEY] [--format <table|json>]
+  jira-cli version --json     Same payload (natural alias)
+
+Output: {version, flavor, jira_version, features[], resolved_fields{story_points,sprint,epic_link}}.
+flavor comes from GET /rest/api/2/serverInfo deploymentType, cross-checked
+with the write-API detection (v3 => cloud).
+
+EXAMPLES:
+  jira-cli capabilities --format json
 """
 
 

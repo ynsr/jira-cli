@@ -32,7 +32,12 @@ jira-cli <command> [args...] [-h] [flags]
 | `search`    | Search issues with JQL or saved filters     |
 | `create`    | Create a new issue                          |
 | `link`      | Link two issues                             |
-| `issue`     | Issue detail, comments, add-comment, attachments (list/download/delete), attach, update |
+| `issue`     | Issue detail, comments, add-comment, attachments (list/download/delete), attach, update, changelog |
+| `board`     | `list` agile boards                         |
+| `sprint`    | `list/get/issues/current` reads; `move/restore` journaled membership moves |
+| `backlog`   | `move` issues to the backlog (journaled, verified) |
+| `permissions` | Check project permissions                 |
+| `capabilities` | CLI version, server flavor, features, resolved field IDs |
 | `setup`     | Configure Jira credentials                  |
 | `help`      | Print help text (AI-agent friendly)         |
 | `completion`| Print shell completion script               |
@@ -66,8 +71,27 @@ jira-cli completion fish
 jira-cli completion-install bash --yes
 jira-cli issue PROJ-123 delete-attachment 10001 --dry-run   # preview the request
 jira-cli issue PROJ-123 delete-attachment 10001 --yes       # execute non-interactively
+jira-cli search "project=IPG" --all --envelope --format json   # every page, envelope
+jira-cli issue IPG-1 changelog --changelog-fields status,assignee --since 7d
+jira-cli board list --project IPG
+jira-cli sprint list --board 3 --state active,future
+jira-cli sprint current --board 3
+jira-cli sprint move --sprint 548 IPG-1 --dry-run   # preview; journal written first on real runs
+jira-cli backlog move IPG-1 --dry-run
+jira-cli permissions --project IPG --check MOVE_ISSUES --format json
+jira-cli capabilities --format json
 jira-cli --timeout 10 --retries 2 issue PROJ-123 comments   # network flags (global)
 ```
+
+### Planner field resolution (agent-friendly)
+
+Resolution, Story Points, Sprint, and Epic Link IDs are resolved per
+domain+project (30-day cache) by exact customfield-ID match first
+(`cfg["fields"][kind]` → `cfg["<kind>_field"]` → `JIRA_CLI_*_FIELD` env),
+falling back to name matching ("Original story points" included).
+JSON detail views carry `resolution`, `story_points`, `sprint` (legacy
+`Name (STATE)` strings), `sprints` (structured `{id,name,state,start,end}`),
+and `epic_key`.
 
 ### Config
 
