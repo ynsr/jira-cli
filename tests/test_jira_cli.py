@@ -474,6 +474,44 @@ class TestCommandsUpdateStatus:
         )
 
 
+class TestCommandsUpdateStoryPoints:
+    def test_update_story_points(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        mock_put = MagicMock(return_value=None)
+        monkeypatch.setattr("jira_cli.commands.jira_put", mock_put)
+        monkeypatch.setattr(
+            "jira_cli.fields.get_custom_field_ids",
+            lambda cfg: {"story_points": "customfield_10104", "sprint": None, "epic_link": None},
+        )
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        cmd_issue_update(cfg, "PROJ-123", story_points="5", yes=True)
+
+        mock_put.assert_called_once_with(
+            cfg, "issue/PROJ-123", {"fields": {"customfield_10104": 5.0}}
+        )
+
+    def test_update_story_points_invalid(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit):
+            cmd_issue_update(cfg, "PROJ-123", story_points="abc", yes=True)
+
+    def test_update_story_points_unresolved(self, monkeypatch):
+        from jira_cli.commands import cmd_issue_update
+
+        monkeypatch.setattr(
+            "jira_cli.fields.get_custom_field_ids",
+            lambda cfg: {"story_points": None, "sprint": None, "epic_link": None},
+        )
+
+        cfg = {"url": "https://jira.x", "user": "u", "pass": "p"}
+        with pytest.raises(SystemExit):
+            cmd_issue_update(cfg, "PROJ-123", story_points="3", yes=True)
+
+
 class TestCommandsUpdateComment:
     def test_update_comment(self, monkeypatch):
         from jira_cli.commands import cmd_issue_update_comment

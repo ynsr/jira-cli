@@ -44,6 +44,7 @@ def parse_flags(args, known=()):
     state = None
     last = None
     sprint = None
+    story_points = None
     journal = None
     check = []
     rest = []
@@ -100,6 +101,9 @@ def parse_flags(args, known=()):
             i += 2
         elif a == "--assignee" and i + 1 < len(args):
             assignee = args[i + 1]
+            i += 2
+        elif a == "--story-points" and i + 1 < len(args):
+            story_points = args[i + 1]
             i += 2
         elif a == "--link-type" and i + 1 < len(args):
             link_type = args[i + 1]
@@ -169,7 +173,8 @@ def parse_flags(args, known=()):
         "max_results": max_results, "format": fmt, "desc": desc, "saved": saved,
         "body": body, "list_filters": list_filters, "project": project,
         "summary": summary, "description": description, "type": issue_type,
-        "priority": priority, "assignee": assignee, "link_type": link_type,
+        "priority": priority, "assignee": assignee, "story_points": story_points,
+        "link_type": link_type,
         "comment": comment, "dir": dir_, "all": all_, "include_raw": include_raw,
         "yes": yes, "dry_run": dry_run, "fields": fields, "expand": expand,
         "envelope": envelope, "changelog_fields": changelog_fields,

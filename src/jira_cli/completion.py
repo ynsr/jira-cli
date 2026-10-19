@@ -42,7 +42,7 @@ _COMPLETION_FLAGS = {
     "backlog": ["--journal", "--yes", "--dry-run"],
     "permissions": ["--project", "--check", "--format"],
     "capabilities": ["--project", "--format"],
-    "issue-update": ["--summary", "--description", "--priority", "--assignee"],
+    "issue-update": ["--summary", "--description", "--priority", "--assignee", "--story-points"],
     "issue-transition": [],
     "issue-edit-comment": ["--body"],
 }
@@ -113,7 +113,7 @@ _jira_cli()
                         COMPREPLY=($(compgen -W "--limit --page --desc --format --help -h" -- "$cur"))
                         ;;
                     update)
-                        COMPREPLY=($(compgen -W "--summary --description --priority --assignee --yes --dry-run --help -h" -- "$cur"))
+                        COMPREPLY=($(compgen -W "--summary --description --priority --assignee --story-points --yes --dry-run --help -h" -- "$cur"))
                         ;;
                     transition)
                         COMPREPLY=($(compgen -W "--yes --dry-run --help -h" -- "$cur"))
@@ -187,7 +187,7 @@ _jira_cli_issue_sub() {
         'download:Download attachment file(s)'
         'delete-attachment:Delete attachment file(s)'
         'attach:Upload attachment file(s)'
-        'update:Update summary/description/priority/assignee'
+        'update:Update summary/description/priority/assignee/story-points'
         'transition:Transition issue to a new status'
         'edit-comment:Edit an existing comment body'
     )
@@ -297,7 +297,8 @@ add-comment)
                     '--summary=[New summary]:text' \\
                     '--description=[New description]:text' \\
                     '--priority=[Priority]:priority:(Highest High Medium Low Lowest)' \\
-                    '--assignee=[Assignee username]:user'
+                    '--assignee=[Assignee username]:user' \
+                    '--story-points=[Story points]:points'
                 ;;
                         esac
                     fi
@@ -401,7 +402,7 @@ complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'attachments
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'download' -d 'Download attachment file(s)'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'delete-attachment' -d 'Delete attachment file(s)'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'attach' -d 'Upload attachment file(s)'
-complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'update' -d 'Update summary/description/priority/assignee'
+complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'update' -d 'Update summary/description/priority/assignee/story-points'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'transition' -d 'Transition issue to a new status'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -a 'edit-comment' -d 'Edit an existing comment body'
 complete -c jira-cli -f -n '__fish_jira_cli_using_command issue' -s h -l help -d 'Show help'
@@ -443,6 +444,7 @@ complete -c jira-cli -f -n '__fish_jira_cli_using_subcommand update' -l summary 
 complete -c jira-cli -f -n '__fish_jira_cli_using_subcommand update' -l description -d 'New description'
 complete -c jira-cli -f -n '__fish_jira_cli_using_subcommand update' -l priority -d 'Priority' -xa 'Highest High Medium Low Lowest'
 complete -c jira-cli -f -n '__fish_jira_cli_using_subcommand update' -l assignee -d 'Assignee username'
+complete -c jira-cli -f -n '__fish_jira_cli_using_subcommand update' -l story-points -d 'Story points (number)'
 
 # issue transition flags
 complete -c jira-cli -f -n '__fish_jira_cli_using_subcommand transition' -s h -l help -d 'Show help'

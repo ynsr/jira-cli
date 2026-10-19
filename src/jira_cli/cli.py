@@ -321,6 +321,7 @@ def _dispatch():
                 description=flags.get("description"),
                 priority=flags.get("priority"),
                 assignee=flags.get("assignee"),
+                story_points=flags.get("story_points"),
                 yes=flags.get("yes", False),
                 dry_run=flags.get("dry_run", False),
             )

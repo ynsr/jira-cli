@@ -63,6 +63,7 @@ jira-cli issue PROJ-123 download 10001
 jira-cli issue PROJ-123 delete-attachment 10001
 jira-cli issue PROJ-123 update --summary "New title" --priority High
 jira-cli issue PROJ-123 update --description "New description" --assignee jane.doe
+jira-cli issue PROJ-123 update --story-points 5 --yes   # writes SP (needs --yes; --dry-run to preview)
 jira-cli create --project BANKING --summary "Fix bug" --type Bug --priority High
 jira-cli link BANKING-123 BANKING-456 --type Blocks --comment "Depends on this"
 jira-cli completion bash

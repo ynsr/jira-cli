@@ -524,8 +524,9 @@ def cmd_link_issues(cfg, outward_key, inward_key, link_type="Relates", comment=N
 # -------------------------------------------------------------------
 
 def cmd_issue_update(cfg, issue_key, summary=None, description=None,
-                     priority=None, assignee=None, yes=False, dry_run=False):
-    """Update editable fields of an issue (summary/description/priority/assignee)."""
+                     priority=None, assignee=None, story_points=None,
+                     yes=False, dry_run=False):
+    """Update editable fields of an issue (summary/description/priority/assignee/story-points)."""
     ensure_api_version_detected(cfg)
 
     fields = {}
@@ -537,9 +538,24 @@ def cmd_issue_update(cfg, issue_key, summary=None, description=None,
         fields["priority"] = {"name": priority}
     if assignee is not None:
         fields["assignee"] = {"name": assignee}
+    if story_points is not None:
+        from jira_cli.fields import get_custom_field_ids
+
+        try:
+            sp_value = float(story_points)
+        except (TypeError, ValueError):
+            print(f"Error: --story-points must be a number, got {story_points!r}.", file=sys.stderr)
+            sys.exit(1)
+        ids = get_custom_field_ids(cfg)
+        sp_id = ids.get("story_points")
+        if not sp_id:
+            print("Error: Story Points field not resolved on this server. "
+                  "Set it explicitly with JIRA_CLI_SP_FIELD=<customfield_N>.", file=sys.stderr)
+            sys.exit(1)
+        fields[sp_id] = sp_value
 
     if not fields:
-        print("Error: nothing to update. Use --summary, --description, --priority, or --assignee.", file=sys.stderr)
+        print("Error: nothing to update. Use --summary, --description, --priority, --assignee, or --story-points.", file=sys.stderr)
         sys.exit(1)
 
     if not guard_destructive(

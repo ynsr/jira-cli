@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Story Points update
+
+- `issue <KEY> update --story-points <n>`: writes SP via the auto-resolved Story Points custom field (`JIRA_CLI_SP_FIELD` pins it); numeric validation, unresolved-field error, guarded by `--yes`/`--dry-run`; help/README/completions updated.
+
 ## 2.2.0 — Planner support (agent-friendly interface for jira-sp-planner)
 
 - Layered Resolution/SP/Sprint/Epic-Link ID resolution (config override → env → exact name incl "Original story points"; per-domain+project 30d cache); structured `sprints[]` + `epic_key` in issue/search JSON, legacy `sprint` untouched.

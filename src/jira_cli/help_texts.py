@@ -19,7 +19,7 @@ COMMANDS:
   issue <KEY> download        Download attachment file(s) (ids or --all)
   issue <KEY> delete-attachment  Delete attachment file(s) (ids or --all)
   issue <KEY> attach <file>   Upload attachment file(s)
-  issue <KEY> update          Update summary/description/priority/assignee
+  issue <KEY> update          Update summary/description/priority/assignee/story-points
   issue <KEY> transition <ID>     Transition issue to a new status
   issue <KEY> edit-comment <ID>   Edit an existing comment body
   issue <KEY> changelog       Normalized change history (--changelog-fields, --since)
@@ -144,7 +144,7 @@ Usage:
   jira-cli issue <KEY> download [<id>...] [--dir <dir>] [--all]  Download attachment file(s)
   jira-cli issue <KEY> delete-attachment <id>... [--all]  Delete attachment file(s)
   jira-cli issue <KEY> attach <file> [<file>...]    Upload attachment file(s)
-  jira-cli issue <KEY> update [flags]               Update fields (summary/description/priority/assignee)
+  jira-cli issue <KEY> update [flags]               Update fields (summary/description/priority/assignee/story-points)
   jira-cli issue <KEY> changelog [--changelog-fields a,b] [--since <when>]  Normalized change history
   jira-cli issue <KEY> -h                      This help text
 
@@ -175,6 +175,7 @@ Flags for 'update' subcommand:
   --description <text>  New description (wiki markup on Jira Server/DC; plain text on Cloud)
   --priority <name>   New priority (e.g. High, Medium, Low)
   --assignee <user>   New assignee (by username; empty string to unassign)
+  --story-points <n>  Story points (number; resolves the server's SP custom field, or JIRA_CLI_SP_FIELD)
 
 EXAMPLES:
   jira-cli issue PROJ-123                                        # detail + latest comment
