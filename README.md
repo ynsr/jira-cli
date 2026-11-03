@@ -569,6 +569,12 @@ $ jira issue attach download ISSUE-1 --all --dir ./downloads
 
 # Delete attachments from an issue
 $ jira issue attach delete ISSUE-1 10000 10001
+
+# Update an attachment by ID (deletes, then uploads the replacement file)
+$ jira issue attach update ISSUE-1 10000 ./screenshot.png
+
+# Update by matching the existing file name (--by-name keeps the name by construction)
+$ jira issue attach update ISSUE-1 ./screenshot.png --by-name
 ```
 
 ### Epic

@@ -26,6 +26,18 @@ jira issue list --csv
 
 Use `--raw` when supported and JSON is needed. Otherwise, use `--plain` with `--columns` and `--no-headers` to minimize parsing ambiguity.
 
+## Attachments
+
+Use `jira issue attach` to manage attachments (`upload`, `list`, `download`, `delete`, `update`).
+
+```sh
+jira issue attach upload BANKING-123 ./screenshot.png
+jira issue attach update BANKING-123 10000 ./screenshot.png      # by ID
+jira issue attach update BANKING-123 ./screenshot.png --by-name  # by file name
+```
+
+There is no in-place update: `update` deletes the old attachment, then uploads the replacement file. With `--by-name` the name is preserved by construction; with ID mode the new file's name is used as-is. The replacement gets a new attachment ID, and a failed upload after the delete loses the old file. If several attachments share the same file name, the first match is replaced — use ID mode for precision.
+
 ## Configuration and fields
 
 The default configuration file is:

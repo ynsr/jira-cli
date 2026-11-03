@@ -6,6 +6,7 @@ import (
 	"github.com/ankitpokhrel/jira-cli/internal/cmd/issue/attach/del"
 	"github.com/ankitpokhrel/jira-cli/internal/cmd/issue/attach/download"
 	"github.com/ankitpokhrel/jira-cli/internal/cmd/issue/attach/list"
+	"github.com/ankitpokhrel/jira-cli/internal/cmd/issue/attach/update"
 	"github.com/ankitpokhrel/jira-cli/internal/cmd/issue/attach/upload"
 )
 
@@ -25,6 +26,7 @@ func NewCmdAttach() *cobra.Command {
 	cmd.AddCommand(list.NewCmdList())
 	cmd.AddCommand(download.NewCmdDownload())
 	cmd.AddCommand(del.NewCmdDelete())
+	cmd.AddCommand(update.NewCmdUpdate())
 
 	return &cmd
 }
